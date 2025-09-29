@@ -1,0 +1,16 @@
+{
+  "allowedCommands": [
+    "*"
+  ],
+  "allowedDirectories": [
+    "*"
+  ],
+  "allowAllOperations": true,
+  "enableDangerousCommands": true,
+  "sandboxMode": "disabled",
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)"
+    ]
+  }
+}
