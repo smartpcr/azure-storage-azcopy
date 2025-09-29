@@ -601,6 +601,7 @@ func (Location) Benchmark() Location { return Location(7) }
 func (Location) GCP() Location       { return Location(8) }
 func (Location) None() Location      { return Location(9) } // None is used in case we're transferring properties
 func (Location) FileNFS() Location   { return Location(10) }
+func (Location) Http() Location      { return Location(11) } // Http is for generic HTTP/HTTPS downloads
 
 func (Location) AzureAccount() Location { return Location(100) } // AzureAccount is never used within AzCopy, and won't be detected, (for now)
 
@@ -637,7 +638,7 @@ func FromToValue(from Location, to Location) FromTo {
 
 func (l Location) IsRemote() bool {
 	switch l {
-	case ELocation.BlobFS(), ELocation.Blob(), ELocation.File(), ELocation.S3(), ELocation.GCP(), ELocation.FileNFS():
+	case ELocation.BlobFS(), ELocation.Blob(), ELocation.File(), ELocation.S3(), ELocation.GCP(), ELocation.FileNFS(), ELocation.Http():
 		return true
 	case ELocation.Local(), ELocation.Benchmark(), ELocation.Pipe(), ELocation.Unknown(), ELocation.None():
 		return false
@@ -665,7 +666,7 @@ func (l Location) IsFolderAware() bool {
 	switch l {
 	case ELocation.BlobFS(), ELocation.File(), ELocation.Local(), ELocation.FileNFS():
 		return true
-	case ELocation.Blob(), ELocation.S3(), ELocation.GCP(), ELocation.Benchmark(), ELocation.Pipe(), ELocation.Unknown(), ELocation.None():
+	case ELocation.Blob(), ELocation.S3(), ELocation.GCP(), ELocation.Http(), ELocation.Benchmark(), ELocation.Pipe(), ELocation.Unknown(), ELocation.None():
 		return false
 	default:
 		panic("unexpected location, please specify if it is folder-aware")
@@ -738,6 +739,7 @@ func (FromTo) FileSMBLocal() FromTo   { return FromToValue(ELocation.File(), ELo
 func (FromTo) FileSMBFileSMB() FromTo { return FromToValue(ELocation.File(), ELocation.File()) }
 func (FromTo) FileSMBFileNFS() FromTo { return FromToValue(ELocation.File(), ELocation.FileNFS()) }
 func (FromTo) FileNFSFileSMB() FromTo { return FromToValue(ELocation.FileNFS(), ELocation.File()) }
+func (FromTo) HttpLocal() FromTo      { return FromToValue(ELocation.Http(), ELocation.Local()) }
 
 // todo: to we really want these?  Starts to look like a bit of a combinatorial explosion
 func (FromTo) BenchmarkBlob() FromTo {

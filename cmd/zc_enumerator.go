@@ -673,6 +673,19 @@ func InitResourceTraverser(resource common.ResourceString, resourceLocation comm
 			}
 		}
 
+	case common.ELocation.Http():
+		resourceURL, err := resource.FullURL()
+		if err != nil {
+			return nil, err
+		}
+
+		recommendHttpsIfNecessary(*resourceURL)
+
+		output, err = newHTTPTraverser(resourceURL.String(), ctx, &opts)
+		if err != nil {
+			return nil, err
+		}
+
 	default:
 		return nil, errors.New("could not choose a traverser from currently available traversers")
 	}

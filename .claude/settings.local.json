@@ -1,4 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(go test:*)",
+      "Bash(go tool cover:*)",
+      "Bash(/dev/null)",
+      "Read(//tmp/**)"
+    ]
+  },
   "allowedCommands": [
     "*"
   ],
@@ -7,10 +16,5 @@
   ],
   "allowAllOperations": true,
   "enableDangerousCommands": true,
-  "sandboxMode": "disabled",
-  "permissions": {
-    "allow": [
-      "Bash(mkdir:*)"
-    ]
-  }
+  "sandboxMode": "disabled"
 }
