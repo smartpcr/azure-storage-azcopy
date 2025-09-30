@@ -7,7 +7,13 @@
       "Bash(/dev/null)",
       "Read(//tmp/**)",
       "Bash(go build:*)",
-      "Bash(/tmp/azcopy_test copy:*)"
+      "Bash(/tmp/azcopy_test copy:*)",
+      "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test go test -v ./e2etest -run TestRealHTTPDownload_SmallFile -enable-real-http-tests -timeout 5m)",
+      "Bash(export:*)",
+      "Bash(timeout 360 go test -v ./e2etest -run TestRealHTTPDownload_AzureStackHCI -enable-real-http-tests -timeout 6m)",
+      "Bash(azcopy jobs:*)",
+      "Bash(/tmp/azcopy_test jobs:*)",
+      "Bash(timeout 120 go test -v ./e2etest -run TestHTTPDownload_AutoScaling -enable-real-http-tests -timeout 3m)"
     ]
   },
   "allowedCommands": [

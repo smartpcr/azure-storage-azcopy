@@ -57,6 +57,10 @@ func DetermineLocationLevel(location string, locationType common.Location, sourc
 	case common.ELocation.Benchmark():
 		return ELocationLevel.Object(), nil // we always benchmark to a subfolder, not the container root
 
+	case common.ELocation.Http():
+		// HTTP sources are always single file downloads - treat as Object level
+		return ELocationLevel.Object(), nil
+
 	case common.ELocation.Blob(),
 		common.ELocation.File(),
 		common.ELocation.FileNFS(),
@@ -186,6 +190,10 @@ func GetResourceRoot(resource string, location common.Location) (resourceBase st
 
 		gcpURL := gcpURLParts.URL()
 		return gcpURL.String(), nil
+	case common.ELocation.Http():
+		// HTTP sources are always single files - just return the URL as-is
+		// No container/bucket concept, no wildcards, no account-level traversal
+		return resource, nil
 	default:
 		panic(fmt.Sprintf("Location %s is missing from GetResourceRoot", location))
 	}
@@ -227,6 +235,10 @@ func splitAuthTokenFromResource(resource string, location common.Location) (reso
 		*baseURL = common.URLExtension{URL: *baseURL}.URLWithPlusDecodedInPath()
 		return baseURL.String(), "", nil
 	case common.ELocation.GCP():
+		return resource, "", nil
+	case common.ELocation.Http():
+		// HTTP sources don't have embedded auth tokens (SAS, etc.)
+		// Authentication is handled via Bearer token flag or custom headers
 		return resource, "", nil
 	case common.ELocation.Benchmark(), // cover for benchmark as we generate data for that
 		common.ELocation.Unknown(), // cover for unknown as we treat that as garbage

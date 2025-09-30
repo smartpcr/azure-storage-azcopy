@@ -68,6 +68,13 @@ func parsePatterns(pattern string) (cookedPatterns []string) {
 // if nothing happens, the original source is returned
 func stripTrailingWildcardOnRemoteSource(source string, location common.Location) (result string, stripTopDir bool, err error) {
 	result = source
+
+	// HTTP sources don't support wildcards - single file downloads only
+	// Skip wildcard processing for HTTP sources
+	if location == common.ELocation.Http() {
+		return result, false, nil
+	}
+
 	resourceURL, err := url.Parse(result)
 	gURLParts := common.NewGenericResourceURLParts(*resourceURL, location)
 
