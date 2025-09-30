@@ -90,6 +90,8 @@ func computeJobXfer(fromTo common.FromTo, blobType common.BlobType) newJobXfer {
 			return newAzureFilesDownloader
 		case common.ELocation.BlobFS():
 			return newBlobFSDownloader
+		case common.ELocation.Http():
+			return newHTTPDownloader
 		default:
 			panic("unexpected source type")
 		}

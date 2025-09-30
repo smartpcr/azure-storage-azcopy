@@ -5,7 +5,9 @@
       "Bash(go test:*)",
       "Bash(go tool cover:*)",
       "Bash(/dev/null)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(go build:*)",
+      "Bash(/tmp/azcopy_test copy:*)"
     ]
   },
   "allowedCommands": [

@@ -23,8 +23,10 @@ func TestValidateArgumentLocation(t *testing.T) {
 		{"https://test.dfs.core.windows.net/container1", "", common.ELocation.BlobFS(), ""},
 		{"https://s3.amazonaws.com/bucket", "", common.ELocation.S3(), ""},
 		{"https://storage.cloud.google.com/bucket", "", common.ELocation.GCP(), ""},
-		{"https://privateendpoint.com/container1", "", common.ELocation.Unknown(), "the inferred location could not be identified, or is currently not supported"},
-		{"http://127.0.0.1:10000/devstoreaccount1/container1", "", common.ELocation.Unknown(), "the inferred location could not be identified, or is currently not supported"},
+		// Generic HTTP URLs should be detected as Http
+		{"https://privateendpoint.com/container1", "", common.ELocation.Http(), ""},
+		{"http://127.0.0.1:10000/devstoreaccount1/container1", "", common.ELocation.Http(), ""},
+		{"https://cdn.example.com/public/file.bin", "", common.ELocation.Http(), ""},
 
 		// User specifies location
 		{"https://privateendpoint.com/container1", "FILE", common.ELocation.File(), ""},
@@ -55,9 +57,14 @@ func TestInferArgumentLocation(t *testing.T) {
 		{"https://test.dfs.core.windows.net/container45", common.ELocation.BlobFS()},
 		{"https://s3.amazonaws.com/bucket", common.ELocation.S3()},
 		{"https://storage.cloud.google.com/bucket", common.ELocation.GCP()},
-		{"https://privateendpoint.com/container1", common.ELocation.Unknown()},
-		{"http://127.0.0.1:10000/devstoreaccount1/container1", common.ELocation.Unknown()},
-		{"https://isd-storage.obs.ae-ad-1.g42cloud.com", common.ELocation.Unknown()},
+		// Generic HTTP URLs should now be detected as Http location
+		{"https://api.example.com/files/data.bin", common.ELocation.Http()},
+		{"http://download.example.com/archive.tar.gz", common.ELocation.Http()},
+		{"https://cdn.mysite.com/videos/video.mp4", common.ELocation.Http()},
+		{"http://localhost:8080/file.txt", common.ELocation.Http()},
+		// IP addresses with HTTP should be Http (not Unknown)
+		{"http://192.168.1.1:8000/file.dat", common.ELocation.Http()},
+		{"http://127.0.0.1:10000/devstoreaccount1/container1", common.ELocation.Http()},
 	}
 
 	for _, v := range test {

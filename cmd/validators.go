@@ -227,9 +227,6 @@ func InferArgumentLocation(arg string) common.Location {
 				return common.ELocation.BlobFS()
 			case strings.Contains(host, benchmarkSourceHost):
 				return common.ELocation.Benchmark()
-				// enable targeting an emulator/stack
-			case IPv4Regex.MatchString(host):
-				return common.ELocation.Unknown()
 			}
 
 			if common.IsS3URL(*u) {
@@ -238,6 +235,12 @@ func InferArgumentLocation(arg string) common.Location {
 
 			if common.IsGCPURL(*u) {
 				return common.ELocation.GCP()
+			}
+
+			// If it's a valid HTTP/HTTPS URL but not a known cloud provider,
+			// treat it as a generic HTTP endpoint
+			if u.Scheme == "http" || u.Scheme == "https" {
+				return common.ELocation.Http()
 			}
 
 			// If none of the above conditions match, return Unknown

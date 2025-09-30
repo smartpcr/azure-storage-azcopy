@@ -146,6 +146,10 @@ type rawCopyCmdArgs struct {
 	// internal override to enforce strip-top-dir
 	internalOverrideStripTopDir bool
 
+	// HTTP-specific authentication
+	bearerToken string // OAuth 2.0 Bearer token for HTTP downloads
+	httpHeaders string // Custom HTTP headers in format "header1=value1;header2=value2"
+
 	// whether to include blobs that have metadata 'hdi_isfolder = true'
 	includeDirectoryStubs bool
 
@@ -1884,6 +1888,17 @@ func init() {
 			"This flag does not copy the actual files. The --overwrite flag has no effect. "+
 			"If you set the --overwrite flag to false, files in the source directory are listed "+
 			"even if those files exist in the destination directory.")
+
+	// HTTP-specific flags
+	cpCmd.PersistentFlags().StringVar(&raw.bearerToken, "bearer-token", "",
+		"OAuth 2.0 Bearer token for HTTP source authentication. "+
+			"\n Use this flag when downloading from HTTP/HTTPS endpoints that require OAuth authentication. "+
+			"\n Example: --bearer-token='eyJ0eXAiOiJKV1QiLCJh...'")
+
+	cpCmd.PersistentFlags().StringVar(&raw.httpHeaders, "http-headers", "",
+		"Custom HTTP headers for HTTP source requests. "+
+			"\n Specify headers in the format 'Header1=Value1;Header2=Value2'. "+
+			"\n Example: --http-headers='X-API-Key=abc123;X-Custom-Header=value'")
 
 	// s2sGetPropertiesInBackend is an optional flag for controlling whether S3 object's or Azure file's full properties are get during enumerating in frontend or
 	// right before transferring in ste(backend).
