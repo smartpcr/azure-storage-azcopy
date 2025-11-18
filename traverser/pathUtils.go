@@ -50,6 +50,10 @@ func splitAuthTokenFromResource(resource string, location common.Location) (reso
 		return baseURL.String(), "", nil
 	case common.ELocation.GCP():
 		return resource, "", nil
+	case common.ELocation.Http():
+		// HTTP sources don't have embedded auth tokens (SAS, etc.)
+		// Authentication is handled via Bearer token flag or custom headers
+		return resource, "", nil
 	case common.ELocation.Benchmark(), // cover for benchmark as we generate data for that
 		common.ELocation.Unknown(), // cover for unknown as we treat that as garbage
 		common.ELocation.None():
