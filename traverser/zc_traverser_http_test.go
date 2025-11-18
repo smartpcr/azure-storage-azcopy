@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cmd
+package traverser
 
 import (
 	"context"
@@ -338,7 +338,7 @@ func TestHTTPTraverser_Traverse(t *testing.T) {
 		ctx := context.Background()
 		enumCounterCalled := false
 		opts := &InitResourceTraverserOptions{
-			IncrementEnumeration: func(entityType common.EntityType) {
+			IncrementEnumeration: func(entityType common.EntityType, symlinkHandling common.SymlinkHandlingType, hardlinkHandling common.HardlinkHandlingType) {
 				enumCounterCalled = true
 				assert.Equal(t, common.EEntityType.File(), entityType)
 			},
@@ -350,8 +350,8 @@ func TestHTTPTraverser_Traverse(t *testing.T) {
 		processed := false
 		processor := func(obj StoredObject) error {
 			processed = true
-			assert.Equal(t, common.EEntityType.File(), obj.entityType)
-			assert.Equal(t, int64(5000), obj.size)
+			assert.Equal(t, common.EEntityType.File(), obj.EntityType)
+			assert.Equal(t, int64(5000), obj.Size)
 			return nil
 		}
 

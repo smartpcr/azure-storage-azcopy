@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package cmd
+package traverser
 
 import (
 	"context"
@@ -108,25 +108,29 @@ func (t *httpTraverser) IsDirectory(isSource bool) (bool, error) {
 // Traverse enumerates the single HTTP file
 func (t *httpTraverser) Traverse(
 	preprocessor objectMorpher,
-	processor objectProcessor,
+	processor ObjectProcessor,
 	filters []ObjectFilter,
 ) error {
-	// Create StoredObject representing this HTTP file
-	object := &StoredObject{
-		name:             t.getFileName(),
-		entityType:       common.EEntityType.File(),
-		lastModifiedTime: t.lastModified,
-		size:             t.contentLength,
-		md5:              t.contentMD5,
-		contentType:      t.contentType,
-		Metadata:         common.Metadata{},
-		relativePath:     "",
+	// Create HTTP properties adapter
+	props := &httpPropsAdapter{
+		contentType:   t.contentType,
+		contentMD5:    t.contentMD5,
+		contentLength: t.contentLength,
 	}
 
-	// Apply preprocessor
-	if preprocessor != nil {
-		preprocessor(object)
-	}
+	// Create StoredObject using constructor
+	object := NewStoredObject(
+		preprocessor,
+		t.getFileName(),
+		"", // relativePath - empty for HTTP downloads
+		common.EEntityType.File(),
+		t.lastModified,
+		t.contentLength,
+		props,        // content props
+		NoContentProps, // blob props (not applicable for HTTP)
+		common.Metadata{},
+		"", // containerName - not applicable for HTTP
+	)
 
 	// Apply filters
 	for _, filter := range filters {
@@ -134,19 +138,19 @@ func (t *httpTraverser) Traverse(
 		if !supported {
 			continue
 		}
-		if !filter.DoesPass(*object) {
-			glcm.Info(fmt.Sprintf("Skipping %s due to filter", object.name))
+		if !filter.DoesPass(object) {
+			// Filter did not pass, skip this file
 			return nil
 		}
 	}
 
 	// Process the object
-	err := processor(*object)
+	err := processor(object)
 	if err != nil {
 		return fmt.Errorf("failed to process HTTP file: %w", err)
 	}
 
-	t.incrementEnumerationCounter(common.EEntityType.File())
+	t.incrementEnumerationCounter(common.EEntityType.File(), common.SymlinkHandlingType(0), common.DefaultHardlinkHandlingType)
 
 	return nil
 }
@@ -253,4 +257,39 @@ func (t *httpTraverser) GetContentLength() int64 {
 // GetETag returns the ETag from HEAD response
 func (t *httpTraverser) GetETag() string {
 	return t.etag
+}
+
+// httpPropsAdapter implements contentPropsProvider interface for HTTP responses
+type httpPropsAdapter struct {
+	contentType   string
+	contentMD5    []byte
+	contentLength int64
+}
+
+func (a *httpPropsAdapter) CacheControl() string {
+	return ""
+}
+
+func (a *httpPropsAdapter) ContentDisposition() string {
+	return ""
+}
+
+func (a *httpPropsAdapter) ContentEncoding() string {
+	return ""
+}
+
+func (a *httpPropsAdapter) ContentLanguage() string {
+	return ""
+}
+
+func (a *httpPropsAdapter) ContentType() string {
+	return a.contentType
+}
+
+func (a *httpPropsAdapter) ContentMD5() []byte {
+	return a.contentMD5
+}
+
+func (a *httpPropsAdapter) ContentLength() int64 {
+	return a.contentLength
 }

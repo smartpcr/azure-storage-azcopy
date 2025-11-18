@@ -1,0 +1,129 @@
+name: CI Build and Test
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: [1.24.6]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build binary
+        run: go build -v
+
+      - name: Build with netgo tags
+        run: go build -tags "netgo" -v -o azcopy_netgo
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run unit tests - cmd
+        run: go test -timeout=1h -v ./cmd
+
+      - name: Run unit tests - common
+        run: go test -timeout=1h -v ./common
+
+      - name: Run unit tests - ste
+        run: go test -timeout=1h -v ./ste
+
+      - name: Run unit tests - traverser (includes HTTP)
+        run: go test -timeout=1h -v ./traverser
+
+      - name: Run HTTP download e2e tests
+        run: |
+          go test -timeout=30m -v ./e2etest \
+            -run "TestRealHTTPDownload_SmallFile|TestRealHTTPDownload_AnonymousPublicCDN|TestHTTP" \
+            -enable-real-http-tests
+        continue-on-error: true
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: azcopy-${{ matrix.os }}-${{ matrix.go }}
+          path: |
+            azcopy
+            azcopy.exe
+            azcopy_netgo
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build-with-coverage:
+    name: Build and Test with Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.6
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build with coverage
+        run: go build -cover -o azcopy
+
+      - name: Run tests with coverage - cmd
+        run: go test -timeout=1h -v -coverprofile=coverage-cmd.txt -covermode=atomic ./cmd
+
+      - name: Run tests with coverage - common
+        run: go test -timeout=1h -v -coverprofile=coverage-common.txt -covermode=atomic ./common
+
+      - name: Run tests with coverage - ste
+        run: go test -timeout=1h -v -coverprofile=coverage-ste.txt -covermode=atomic ./ste
+
+      - name: Run tests with coverage - traverser (includes HTTP)
+        run: go test -timeout=1h -v -coverprofile=coverage-traverser.txt -covermode=atomic ./traverser
+
+      - name: Run HTTP download e2e tests with coverage
+        run: |
+          go test -timeout=30m -v -coverprofile=coverage-e2etest-http.txt -covermode=atomic ./e2etest \
+            -run "TestRealHTTPDownload_SmallFile|TestRealHTTPDownload_AnonymousPublicCDN|TestHTTP" \
+            -enable-real-http-tests
+        continue-on-error: true
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: coverage-*.txt
+          retention-days: 30

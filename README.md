@@ -22,6 +22,8 @@ AzCopy V10 presents easy-to-use commands that are optimized for high performance
 
 :white_check_mark: Copy objects, directories, and buckets from Google Cloud Platform (GCP) to Azure Blob Storage (Blobs only).
 
+:white_check_mark: Download files from HTTP/HTTPS endpoints with automatic parallelization and authentication support.
+
 :white_check_mark: List files in a container.
 
 :white_check_mark: Recover from failures by restarting previous jobs.
@@ -50,6 +52,8 @@ For complete guidance, visit any of these articles on the docs.microsoft.com web
 
 :eight_spoked_asterisk: [Transfer data with AzCopy and Google GCP buckets](https://docs.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-google-cloud)
 
+:eight_spoked_asterisk: [Download files from HTTP/HTTPS endpoints](docs/HTTP_DOWNLOADS.md)
+
 :eight_spoked_asterisk: [Use data transfer tools in Azure Stack Hub Storage](https://docs.microsoft.com/en-us/azure-stack/user/azure-stack-storage-transfer)
 
 :eight_spoked_asterisk: [Configure, optimize, and troubleshoot AzCopy](https://docs.microsoft.com/azure/storage/common/storage-use-azcopy-configure)
@@ -72,6 +76,7 @@ The general format of the AzCopy commands is: `azcopy [command] [arguments] --[f
     - Azure Files (SAS or OAuth authentication) -> Azure Blob (SAS or OAuth authentication)
     - AWS S3 (Access Key) -> Azure Block Blob (SAS or OAuth authentication)
     - Google Cloud Storage (Service Account Key) -> Azure Block Blob (SAS or OAuth authentication) [Preview]
+    - HTTP/HTTPS (Anonymous or Bearer token) -> Local File System
 
 * `sync` - Replicate source to the destination location. The supported directions are:
     - Local File System <-> Azure Blob (SAS or OAuth authentication)
@@ -97,6 +102,48 @@ The general format of the AzCopy commands is: `azcopy [command] [arguments] --[f
 * `make` - Create a container or file share.
 
 * `remove` - Delete blobs or files from an Azure storage account
+
+## HTTP Downloads
+
+AzCopy supports downloading files from generic HTTP/HTTPS endpoints with automatic parallelization and enterprise-grade reliability.
+
+### Quick Examples
+
+**Download a public file:**
+```bash
+azcopy copy "https://example.com/files/data.bin" "./downloads/"
+```
+
+**Download Azure Stack HCI ISO (3.5GB, real-world example):**
+```bash
+# Download Azure Stack HCI evaluation ISO from Microsoft CDN
+azcopy copy "https://aka.ms/infrahcios23" "./AzureStackHCI.iso"
+
+# With bandwidth limit for large downloads
+azcopy copy "https://aka.ms/infrahcios23" "./AzureStackHCI.iso" --cap-mbps=100
+```
+
+**Download with OAuth Bearer token:**
+```bash
+azcopy copy "https://api.example.com/files/data.bin" "./downloads/" \
+  --bearer-token="eyJ0eXAiOiJKV1QiLCJhbGci..."
+```
+
+**Download with custom headers:**
+```bash
+azcopy copy "https://api.example.com/files/data.json" "./downloads/" \
+  --http-headers="X-API-Key=abc123;X-Request-ID=req-12345"
+```
+
+### Key Features
+
+- **Auto-scaling parallel downloads** - Automatically uses multiple connections for faster downloads
+- **Anonymous and authenticated access** - Supports public URLs and OAuth 2.0 Bearer tokens
+- **Range request detection** - Automatically detects and uses HTTP Range requests for parallel chunks
+- **Progress tracking** - Real-time progress, throughput, and ETA
+- **Bandwidth control** - Cap download speed to avoid network saturation
+
+For complete documentation, see [HTTP_DOWNLOADS.md](docs/HTTP_DOWNLOADS.md).
 
 ## Find help from your command prompt
 
