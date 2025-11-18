@@ -1,0 +1,318 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (semver, e.g. 10.32.0). Leave empty to use version from common/version.go. A leading v is optional.'
+        required: false
+      release_notes:
+        description: 'Optional release notes (Markdown).'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, test, and create release
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION_INPUT: ${{ inputs.release_version }}
+      RELEASE_NOTES_INPUT: ${{ inputs.release_notes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.6
+
+      - name: Get version from source or input
+        id: version
+        run: |
+          set -euo pipefail
+
+          # If version input is provided, use it; otherwise extract from common/version.go
+          if [ -n "${RELEASE_VERSION_INPUT}" ]; then
+            INPUT="${RELEASE_VERSION_INPUT}"
+            INPUT="$(echo "${INPUT}" | xargs)"
+            INPUT="${INPUT#v}"
+          else
+            # Extract version from common/version.go
+            INPUT=$(grep 'const AzcopyVersion' common/version.go | cut -d'"' -f2)
+            echo "Using version from common/version.go: ${INPUT}"
+          fi
+
+          if [ -z "${INPUT}" ]; then
+            echo "Release version cannot be empty." >&2
+            exit 1
+          fi
+
+          echo "version=${INPUT}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${INPUT}" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=${INPUT}" >> "$GITHUB_ENV"
+          echo "TAG_NAME=v${INPUT}" >> "$GITHUB_ENV"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: |
+          go test -timeout=1h -v ./cmd
+          go test -timeout=1h -v ./common
+          go test -timeout=1h -v ./ste
+          go test -timeout=1h -v ./traverser
+
+      - name: Run HTTP download e2e tests
+        run: |
+          go test -timeout=30m -v ./e2etest \
+            -run "TestRealHTTPDownload_SmallFile|TestRealHTTPDownload_AnonymousPublicCDN|TestHTTP" \
+            -enable-real-http-tests
+        continue-on-error: true
+
+  build-linux:
+    name: Build Linux binaries
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.6
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.release_version }}" ]; then
+            VERSION="${{ inputs.release_version }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(grep 'const AzcopyVersion' common/version.go | cut -d'"' -f2)
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Linux AMD64
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o azcopy_linux_amd64 \
+            -ldflags "-s -w" .
+          tar -czf azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz azcopy_linux_amd64
+
+      - name: Build Linux ARM64
+        run: |
+          GOOS=linux GOARCH=arm64 go build -o azcopy_linux_arm64 \
+            -ldflags "-s -w" .
+          tar -czf azcopy_linux_arm64_${{ steps.version.outputs.version }}.tar.gz azcopy_linux_arm64
+
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: |
+            azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz
+            azcopy_linux_arm64_${{ steps.version.outputs.version }}.tar.gz
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows binaries
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.6
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.release_version }}" ]; then
+            VERSION="${{ inputs.release_version }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(grep 'const AzcopyVersion' common/version.go | cut -d'"' -f2)
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Windows AMD64
+        shell: bash
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o azcopy_windows_amd64.exe \
+            -ldflags "-s -w" .
+
+      - name: Create Windows archive
+        shell: bash
+        run: |
+          7z a -tzip azcopy_windows_amd64_${{ steps.version.outputs.version }}.zip azcopy_windows_amd64.exe
+
+      - name: Upload Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: azcopy_windows_amd64_${{ steps.version.outputs.version }}.zip
+          retention-days: 1
+
+  build-macos:
+    name: Build macOS binaries
+    needs: release
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.6
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.release_version }}" ]; then
+            VERSION="${{ inputs.release_version }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(grep 'const AzcopyVersion' common/version.go | cut -d'"' -f2)
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS AMD64
+        run: |
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o azcopy_darwin_amd64 \
+            -ldflags "-s -w" .
+          tar -czf azcopy_darwin_amd64_${{ steps.version.outputs.version }}.tar.gz azcopy_darwin_amd64
+
+      - name: Build macOS ARM64 (M1/M2)
+        run: |
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o azcopy_darwin_arm64 \
+            -ldflags "-s -w" .
+          tar -czf azcopy_darwin_arm64_${{ steps.version.outputs.version }}.tar.gz azcopy_darwin_arm64
+
+      - name: Upload macOS binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: |
+            azcopy_darwin_amd64_${{ steps.version.outputs.version }}.tar.gz
+            azcopy_darwin_arm64_${{ steps.version.outputs.version }}.tar.gz
+          retention-days: 1
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.release_version }}" ]; then
+            VERSION="${{ inputs.release_version }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION=$(grep 'const AzcopyVersion' common/version.go | cut -d'"' -f2)
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Organize release files
+        run: |
+          mkdir -p release
+          find ./artifacts -type f -name "*.tar.gz" -exec cp {} release/ \;
+          find ./artifacts -type f -name "*.zip" -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Prepare release notes
+        run: |
+          if [ -z "${{ inputs.release_notes }}" ]; then
+            cat > RELEASE_NOTES.md << 'EOF'
+          # AzCopy ${{ steps.version.outputs.version }}
+
+          This release includes binaries for:
+          - Linux (AMD64, ARM64)
+          - Windows (AMD64)
+          - macOS (AMD64, ARM64/M1/M2)
+
+          ## What's New
+          - HTTP/HTTPS download support with auto-scaling parallel downloads
+          - OAuth 2.0 Bearer token authentication
+          - Custom HTTP headers support
+          - Range request detection and parallel chunk downloads
+
+          ## Installation
+
+          ### Linux
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz
+          tar -xzf azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz
+          chmod +x azcopy_linux_amd64
+          sudo mv azcopy_linux_amd64 /usr/local/bin/azcopy
+          ```
+
+          ### Windows
+          Download and extract `azcopy_windows_amd64_${{ steps.version.outputs.version }}.zip`
+
+          ### macOS
+          ```bash
+          # For Intel Macs
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/azcopy_darwin_amd64_${{ steps.version.outputs.version }}.tar.gz | tar -xz
+
+          # For Apple Silicon (M1/M2)
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/azcopy_darwin_arm64_${{ steps.version.outputs.version }}.tar.gz | tar -xz
+
+          chmod +x azcopy_darwin_*
+          sudo mv azcopy_darwin_* /usr/local/bin/azcopy
+          ```
+
+          ## Usage
+
+          Download files from HTTP/HTTPS:
+          ```bash
+          # Public file
+          azcopy copy "https://example.com/file.bin" "./downloads/"
+
+          # With authentication
+          azcopy copy "https://api.example.com/file.bin" "./downloads/" \
+            --bearer-token="your-token-here"
+
+          # With bandwidth limit
+          azcopy copy "https://example.com/large-file.iso" "./downloads/" \
+            --cap-mbps=100
+          ```
+
+          ---
+
+          🤖 Generated with the manual release workflow
+          EOF
+          else
+            printf "%s" "${{ inputs.release_notes }}" > RELEASE_NOTES.md
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: AzCopy ${{ steps.version.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          files: release/*
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, 'preview') || contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'beta') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
