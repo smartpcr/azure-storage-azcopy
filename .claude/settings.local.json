@@ -20,7 +20,8 @@
       "Bash(unset GIT_SSH_COMMAND)",
       "Bash(./azcopy copy:*)",
       "Bash(./azure-storage-azcopy copy:*)",
-      "Bash(./azcopy_bin:*)"
+      "Bash(./azcopy_bin:*)",
+      "Bash(tree:*)"
     ]
   },
   "allowedCommands": [

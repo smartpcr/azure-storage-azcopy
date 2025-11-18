@@ -58,8 +58,8 @@ jobs:
           go vet ./traverser/...
         continue-on-error: true
 
-      - name: Run unit tests - cmd
-        run: go test -timeout=1h -v ./cmd
+      - name: Run unit tests - cmd (non-Azure tests only)
+        run: go test -timeout=1h -v ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
 
       - name: Run unit tests - common
         run: go test -timeout=1h -v ./common
@@ -107,8 +107,8 @@ jobs:
       - name: Build with coverage
         run: go build -cover -o azcopy
 
-      - name: Run tests with coverage - cmd
-        run: go test -timeout=1h -v -coverprofile=coverage-cmd.txt -covermode=atomic ./cmd
+      - name: Run tests with coverage - cmd (non-Azure tests only)
+        run: go test -timeout=1h -v -coverprofile=coverage-cmd.txt -covermode=atomic ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
 
       - name: Run tests with coverage - common
         run: go test -timeout=1h -v -coverprofile=coverage-common.txt -covermode=atomic ./common
