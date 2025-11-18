@@ -117,6 +117,7 @@ func TestHTTPDownload_Resume(t *testing.T) {
 	t.Logf("Phase 1: Starting initial download (will be cancelled)...")
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Ensure cancel is called on all paths
 	cmd := exec.CommandContext(ctx, azcopyPath,
 		"copy",
 		sourceURL,
