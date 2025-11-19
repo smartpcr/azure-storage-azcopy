@@ -4,11 +4,21 @@ This directory contains persistent context about the AzCopy codebase that should
 
 ## Files
 
+### Core Documentation
 - **architecture-decisions.md** - Key architectural choices and their rationale
 - **known-issues.md** - Current bugs, limitations, and workarounds
 - **optimization-opportunities.md** - Performance and code quality improvements identified
-- **testing-strategy.md** - Test coverage and testing approach
 - **development-notes.md** - Developer tips and gotchas
+
+### Component Deep Dives
+- **ste.md** - Complete Storage Transfer Engine (STE) documentation
+  - 108 Go files analyzed
+  - Job management architecture
+  - Transfer abstractions (downloaders, uploaders, senders)
+  - Source info providers
+  - Performance & concurrency systems
+  - Retry & error handling
+  - Complete file reference guide
 
 ## Purpose
 

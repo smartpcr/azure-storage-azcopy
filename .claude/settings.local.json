@@ -21,7 +21,9 @@
       "Bash(./azcopy copy:*)",
       "Bash(./azure-storage-azcopy copy:*)",
       "Bash(./azcopy_bin:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(timeout 120 go test:*)",
+      "Bash(timeout 10 go test:*)"
     ]
   },
   "allowedCommands": [
