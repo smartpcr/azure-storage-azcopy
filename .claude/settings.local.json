@@ -30,7 +30,11 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(git tag:*)"
+      "Bash(git tag:*)",
+      "Bash(chmod:*)",
+      "Bash(ln:*)",
+      "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 10 go test:*)",
+      "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 120 go test:*)"
     ]
   },
   "allowedCommands": [
