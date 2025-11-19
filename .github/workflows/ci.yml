@@ -79,6 +79,7 @@ jobs:
 
       - name: Run HTTP download e2e tests
         run: |
+          export AZCOPY_EXECUTABLE_PATH="${GITHUB_WORKSPACE}/azure-storage-azcopy"
           go test -timeout=30m -v ./e2etest \
             -run "TestRealHTTPDownload_SmallFile|TestRealHTTPDownload_AnonymousPublicCDN|TestHTTP" \
             -enable-real-http-tests
@@ -130,6 +131,7 @@ jobs:
 
       - name: Run HTTP download e2e tests with coverage
         run: |
+          export AZCOPY_EXECUTABLE_PATH="${GITHUB_WORKSPACE}/azcopy"
           go test -timeout=30m -v -coverprofile=coverage-e2etest-http.txt -covermode=atomic ./e2etest \
             -run "TestRealHTTPDownload_SmallFile|TestRealHTTPDownload_AnonymousPublicCDN|TestHTTP" \
             -enable-real-http-tests

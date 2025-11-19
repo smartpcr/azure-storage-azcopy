@@ -497,7 +497,7 @@ func TestHTTPDownload_Resume(t *testing.T) {
 	t.Logf("✓ Resume test completed")
 	t.Logf("")
 	t.Logf("Summary:")
-	t.Logf("  - Phase 1: Successfully interrupted download at 10%+ progress ✓")
+	t.Logf("  - Phase 1: Successfully interrupted download at 10%%+ progress ✓")
 	t.Logf("  - Phase 2: Documented resume limitations for HTTP ✓")
 	t.Logf("  - Phase 3: Demonstrated idempotent re-run pattern ✓")
 	t.Logf("")

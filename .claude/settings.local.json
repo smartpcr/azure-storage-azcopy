@@ -34,7 +34,16 @@
       "Bash(chmod:*)",
       "Bash(ln:*)",
       "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 10 go test:*)",
-      "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 120 go test:*)"
+      "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 120 go test:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh release view:*)",
+      "Bash(gh release download:*)",
+      "Bash(cat:*)",
+      "Bash(export AZCOPY_EXECUTABLE_PATH=/home/xiaodoli/work/github/azcopy/azure-storage-azcopy:*)",
+      "Bash(gh release list:*)",
+      "Bash(go vet:*)",
+      "Bash(find:*)"
     ]
   },
   "allowedCommands": [
