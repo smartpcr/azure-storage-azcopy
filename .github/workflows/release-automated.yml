@@ -1,0 +1,90 @@
+name: Release (Automated)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Run tests before release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.6
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests - cmd (non-Azure tests only)
+        run: go test -timeout=1h -v ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
+
+      - name: Run unit tests - common (skip Azure credential and keyring tests)
+        run: go test -timeout=1h -v ./common -skip "TestDoWithOverrideReadonlyonAzureFiles|TestCredCache"
+
+      - name: Run unit tests - ste (skip Azure credential tests)
+        run: go test -timeout=1h -v ./ste -skip "Test500FollowedBy412Logic|Test404DeleteSuccessLogic|TestDeleteDstBlob|TestBenchmark|TestBlockBlob|TestShareFile|TestShareDirectory|TestGCP|TestLocal|TestS3|TestSrcAuthPolicy"
+
+      - name: Run unit tests - traverser (includes HTTP)
+        run: go test -timeout=1h -v ./traverser
+
+      - name: Run HTTP download e2e tests
+        run: |
+          go test -timeout=30m -v ./e2etest \
+            -run "TestRealHTTPDownload_SmallFile|TestRealHTTPDownload_AnonymousPublicCDN|TestHTTP" \
+            -enable-real-http-tests
+        continue-on-error: true
+
+  release:
+    name: Create release with GoReleaser
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.6
+
+      - name: Get tag version
+        id: version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG"
+          echo "Release version: $VERSION"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+
+      - name: Upload GoReleaser artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: goreleaser-dist
+          path: dist/
+          retention-days: 7

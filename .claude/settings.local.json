@@ -23,7 +23,10 @@
       "Bash(./azcopy_bin:*)",
       "Bash(tree:*)",
       "Bash(timeout 120 go test:*)",
-      "Bash(timeout 10 go test:*)"
+      "Bash(timeout 10 go test:*)",
+      "Bash(xargs:*)",
+      "Bash(command -v:*)",
+      "Bash(git describe:*)"
     ]
   },
   "allowedCommands": [
