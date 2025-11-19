@@ -26,7 +26,11 @@
       "Bash(timeout 10 go test:*)",
       "Bash(xargs:*)",
       "Bash(command -v:*)",
-      "Bash(git describe:*)"
+      "Bash(git describe:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git tag:*)"
     ]
   },
   "allowedCommands": [

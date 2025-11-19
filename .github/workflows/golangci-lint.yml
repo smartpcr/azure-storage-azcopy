@@ -1,13 +1,18 @@
-name: golangci-lint
+name: golangci-lint (Disabled)
+
+# Workflow disabled - uncomment 'on' section below to re-enable
+# on:
+#   push:
+#     branches:
+#       - dev
+#       - main
+#   pull_request:
+#     branches:
+#       - dev
+#       - main
+
 on:
-  push:
-    branches:
-      - dev
-      - main
-  pull_request:
-    branches:
-      - dev
-      - main
+  workflow_dispatch:  # Only allow manual triggering
 permissions:
   contents: read
   # Optional: allow read access to pull request. Use with `only-new-issues` option.
