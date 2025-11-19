@@ -65,8 +65,8 @@ jobs:
 
       - name: Run unit tests
         run: |
-          # Skip TestSync_NFSSpecificValidationForFlags on all platforms for release builds
-          go test -timeout=1h -v ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
+          # Run same tests as CI workflow
+          go test -timeout=1h -v ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
           go test -timeout=1h -v ./common -skip "TestDoWithOverrideReadonlyonAzureFiles|TestCredCache|TestDecompressingWriter_SuccessCases"
           go test -timeout=1h -v ./ste -skip "Test500FollowedBy412Logic|Test404DeleteSuccessLogic|TestDeleteDstBlob|TestBenchmark|TestBlockBlob|TestShareFile|TestShareDirectory|TestGCP|TestLocal|TestS3|TestSrcAuthPolicy"
           go test -timeout=1h -v ./traverser
