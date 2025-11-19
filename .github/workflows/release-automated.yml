@@ -29,8 +29,8 @@ jobs:
 
       - name: Run unit tests - cmd (non-Azure tests only)
         run: |
-          # Skip TestSync_NFSSpecificValidationForFlags due to platform-specific test failures on Windows
-          go test -timeout=1h -v ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
+          # Run same tests as CI workflow
+          go test -timeout=1h -v ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
 
       - name: Run unit tests - common (skip Azure credential and keyring tests)
         run: go test -timeout=1h -v ./common -skip "TestDoWithOverrideReadonlyonAzureFiles|TestCredCache|TestDecompressingWriter_SuccessCases"
