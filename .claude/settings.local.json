@@ -45,7 +45,10 @@
       "Bash(go vet:*)",
       "Bash(find:*)",
       "Bash(./azure-storage-azcopy:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(GOOS=linux GOARCH=amd64 go build:*)",
+      "Bash(git restore:*)",
+      "Bash(tar:*)"
     ]
   },
   "allowedCommands": [

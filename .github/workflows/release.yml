@@ -108,15 +108,19 @@ jobs:
 
       - name: Build Linux AMD64
         run: |
-          GOOS=linux GOARCH=amd64 go build -o azcopy_linux_amd64 \
+          mkdir -p build-amd64
+          GOOS=linux GOARCH=amd64 go build -o build-amd64/azcopy \
             -ldflags "-s -w" .
-          tar -czf azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz azcopy_linux_amd64
+          tar -czf azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz -C build-amd64 azcopy
+          rm -rf build-amd64
 
       - name: Build Linux ARM64
         run: |
-          GOOS=linux GOARCH=arm64 go build -o azcopy_linux_arm64 \
+          mkdir -p build-arm64
+          GOOS=linux GOARCH=arm64 go build -o build-arm64/azcopy \
             -ldflags "-s -w" .
-          tar -czf azcopy_linux_arm64_${{ steps.version.outputs.version }}.tar.gz azcopy_linux_arm64
+          tar -czf azcopy_linux_arm64_${{ steps.version.outputs.version }}.tar.gz -C build-arm64 azcopy
+          rm -rf build-arm64
 
       - name: Upload Linux binaries
         uses: actions/upload-artifact@v4
@@ -155,13 +159,15 @@ jobs:
       - name: Build Windows AMD64
         shell: bash
         run: |
-          GOOS=windows GOARCH=amd64 go build -o azcopy_windows_amd64.exe \
+          mkdir -p build-win
+          GOOS=windows GOARCH=amd64 go build -o build-win/azcopy.exe \
             -ldflags "-s -w" .
 
       - name: Create Windows archive
         shell: bash
         run: |
-          7z a -tzip azcopy_windows_amd64_${{ steps.version.outputs.version }}.zip azcopy_windows_amd64.exe
+          cd build-win && 7z a -tzip ../azcopy_windows_amd64_${{ steps.version.outputs.version }}.zip azcopy.exe && cd ..
+          rm -rf build-win
 
       - name: Upload Windows binaries
         uses: actions/upload-artifact@v4
@@ -196,15 +202,19 @@ jobs:
 
       - name: Build macOS AMD64
         run: |
-          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o azcopy_darwin_amd64 \
+          mkdir -p build-darwin-amd64
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o build-darwin-amd64/azcopy \
             -ldflags "-s -w" .
-          tar -czf azcopy_darwin_amd64_${{ steps.version.outputs.version }}.tar.gz azcopy_darwin_amd64
+          tar -czf azcopy_darwin_amd64_${{ steps.version.outputs.version }}.tar.gz -C build-darwin-amd64 azcopy
+          rm -rf build-darwin-amd64
 
       - name: Build macOS ARM64 (M1/M2)
         run: |
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o azcopy_darwin_arm64 \
+          mkdir -p build-darwin-arm64
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o build-darwin-arm64/azcopy \
             -ldflags "-s -w" .
-          tar -czf azcopy_darwin_arm64_${{ steps.version.outputs.version }}.tar.gz azcopy_darwin_arm64
+          tar -czf azcopy_darwin_arm64_${{ steps.version.outputs.version }}.tar.gz -C build-darwin-arm64 azcopy
+          rm -rf build-darwin-arm64
 
       - name: Upload macOS binaries
         uses: actions/upload-artifact@v4
@@ -270,8 +280,8 @@ jobs:
           ```bash
           wget https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz
           tar -xzf azcopy_linux_amd64_${{ steps.version.outputs.version }}.tar.gz
-          chmod +x azcopy_linux_amd64
-          sudo mv azcopy_linux_amd64 /usr/local/bin/azcopy
+          chmod +x azcopy
+          sudo mv azcopy /usr/local/bin/azcopy
           ```
 
           ### Windows
@@ -285,8 +295,8 @@ jobs:
           # For Apple Silicon (M1/M2)
           curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/azcopy_darwin_arm64_${{ steps.version.outputs.version }}.tar.gz | tar -xz
 
-          chmod +x azcopy_darwin_*
-          sudo mv azcopy_darwin_* /usr/local/bin/azcopy
+          chmod +x azcopy
+          sudo mv azcopy /usr/local/bin/azcopy
           ```
 
           ## Usage
