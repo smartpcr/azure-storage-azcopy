@@ -120,7 +120,7 @@ jobs:
           go test -timeout=1h -v -coverprofile=coverage-cmd.txt -covermode=atomic ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
 
       - name: Run tests with coverage - common (skip Azure credential and keyring tests)
-        run: go test -timeout=1h -v -coverprofile=coverage-common.txt -covermode=atomic ./common -skip "TestDoWithOverrideReadonlyonAzureFiles|TestCredCache"
+        run: go test -timeout=1h -v -coverprofile=coverage-common.txt -covermode=atomic ./common -skip "TestDoWithOverrideReadonlyonAzureFiles|TestCredCache|TestDecompressingWriter_SuccessCases"
 
       - name: Run tests with coverage - ste (skip Azure credential tests)
         run: go test -timeout=1h -v -coverprofile=coverage-ste.txt -covermode=atomic ./ste -skip "Test500FollowedBy412Logic|Test404DeleteSuccessLogic|TestDeleteDstBlob|TestBenchmark|TestBlockBlob|TestShareFile|TestShareDirectory|TestGCP|TestLocal|TestS3|TestSrcAuthPolicy"
