@@ -115,7 +115,9 @@ jobs:
         run: go build -cover -o azcopy
 
       - name: Run tests with coverage - cmd (non-Azure tests only)
-        run: go test -timeout=1h -v -coverprofile=coverage-cmd.txt -covermode=atomic ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
+        run: |
+          # Run same tests as main CI workflow (Linux/macOS pattern since coverage runs on ubuntu)
+          go test -timeout=1h -v -coverprofile=coverage-cmd.txt -covermode=atomic ./cmd -run "^(TestHTTP|TestRelativePath|TestCopy_NFSSpecificValidationForFlags|TestCopy_SMBSpecificValidationForFlags|TestSync_NFSSpecificValidationForFlags|TestSync_SMBSpecificValidationForFlags|TestValidateFromTo|TestVersion|TestCache|TestConversions|TestDryrunStat)$"
 
       - name: Run tests with coverage - common (skip Azure credential and keyring tests)
         run: go test -timeout=1h -v -coverprofile=coverage-common.txt -covermode=atomic ./common -skip "TestDoWithOverrideReadonlyonAzureFiles|TestCredCache"
