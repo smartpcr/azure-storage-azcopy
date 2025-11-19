@@ -25,6 +25,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-storage-azcopy/v10/common"
@@ -224,8 +226,12 @@ func (hd *httpDownloader) detectCapabilities() error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HEAD request returned status %d: %s", resp.StatusCode, resp.Status)
+	// Accept any 2xx status code (not just 200 OK)
+	// Some servers/CDNs return 206 Partial Content or other 2xx codes for HEAD
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// HEAD request failed or returned redirect/error
+		// Some servers don't support HEAD - try falling back to GET with Range:bytes=0-0
+		return hd.detectCapabilitiesWithGET()
 	}
 
 	// Detect range support
@@ -234,6 +240,74 @@ func (hd *httpDownloader) detectCapabilities() error {
 
 	// Get content length
 	if resp.ContentLength > 0 {
+		hd.contentLength = resp.ContentLength
+	}
+
+	// Parse Content-MD5 if available
+	contentMD5 := resp.Header.Get("Content-MD5")
+	if contentMD5 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(contentMD5)
+		if err == nil {
+			hd.expectedMD5 = decoded
+		}
+	}
+
+	// Get ETag for consistency checks
+	hd.etag = resp.Header.Get("ETag")
+
+	return nil
+}
+
+// detectCapabilitiesWithGET falls back to using a small GET request when HEAD fails
+// This is needed for servers/CDNs that don't properly support HEAD (like some redirect services)
+func (hd *httpDownloader) detectCapabilitiesWithGET() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", hd.sourceURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create GET request: %w", err)
+	}
+
+	// Request only first byte to minimize data transfer
+	req.Header.Set("Range", "bytes=0-0")
+
+	// Add authentication
+	if hd.bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+hd.bearerToken)
+	}
+
+	resp, err := hd.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("GET request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Accept 200 OK (full content) or 206 Partial Content
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return fmt.Errorf("GET request returned status %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	// Detect range support - if we got 206, server supports ranges
+	if resp.StatusCode == http.StatusPartialContent {
+		hd.supportsRange = true
+	} else {
+		// Server returned 200 for range request - it doesn't support ranges
+		acceptRanges := resp.Header.Get("Accept-Ranges")
+		hd.supportsRange = (acceptRanges == "bytes")
+	}
+
+	// Get content length from Content-Range header if available
+	contentRange := resp.Header.Get("Content-Range")
+	if contentRange != "" {
+		// Parse "bytes 0-0/12345" format
+		parts := strings.Split(contentRange, "/")
+		if len(parts) == 2 {
+			if size, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				hd.contentLength = size
+			}
+		}
+	} else if resp.ContentLength > 0 {
 		hd.contentLength = resp.ContentLength
 	}
 

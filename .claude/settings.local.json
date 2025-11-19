@@ -43,7 +43,9 @@
       "Bash(export AZCOPY_EXECUTABLE_PATH=/home/xiaodoli/work/github/azcopy/azure-storage-azcopy:*)",
       "Bash(gh release list:*)",
       "Bash(go vet:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(./azure-storage-azcopy:*)",
+      "Bash(timeout:*)"
     ]
   },
   "allowedCommands": [
