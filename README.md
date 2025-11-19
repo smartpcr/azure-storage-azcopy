@@ -143,6 +143,57 @@ azcopy copy "https://api.example.com/files/data.json" "./downloads/" \
 - **Progress tracking** - Real-time progress, throughput, and ETA
 - **Bandwidth control** - Cap download speed to avoid network saturation
 
+### Performance Benchmark
+
+Download performance comparison using Azure Stack HCI ISO (3.5GB) on 1Gbps connection:
+
+```powershell
+$downloadUrl = "https://aka.ms/infrahcios23"
+$downloadIsoFile = "./AzureStackHCI.iso"
+$azCopyPath = ".\azcopy.exe"
+
+#region azcopy: full bandwidth at 1Gbps, 33 sec
+if (Test-Path $downloadIsoFile) {
+    Remove-item $downloadIsoFile -Force
+}
+$time1 = Measure-Command {
+    & $azCopyPath copy $downloadUrl $downloadIsoFile
+}
+Write-Host "Download completed in $($time1.TotalSeconds) seconds using azcopy"
+#endregion
+
+
+#region invoke-webrequest: varies, start at 250Mbps, after 1 min, sustain at 120-130Mbps, 230 sec
+if (Test-Path $downloadIsoFile) {
+    Remove-item $downloadIsoFile -Force
+}
+
+$time2 = Measure-Command {
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadIsoFile
+}
+Write-Host "Download completed in $($time2.TotalSeconds) seconds using invoke-webrequest"
+#endregion
+
+
+#region bits: 500-800Mbps, 51 sec
+if (Test-Path $downloadIsoFile) {
+    Remove-item $downloadIsoFile -Force
+}
+
+$time3 = Measure-Command {
+    Start-BitsTransfer -Source $downloadUrl -Destination $downloadIsoFile -DisplayName "Azure Stack HCI Download"
+}
+Write-Host "Download completed in $($time3.TotalSeconds) seconds using BITS"
+#endregion
+```
+
+**Results:**
+- **AzCopy**: ~33 seconds (full 1Gbps bandwidth utilization)
+- **BITS**: ~51 seconds (500-800Mbps)
+- **Invoke-WebRequest**: ~230 seconds (120-130Mbps sustained)
+
+AzCopy's parallel chunking delivers **7x faster** downloads compared to PowerShell's Invoke-WebRequest.
+
 For complete documentation, see [HTTP_DOWNLOADS.md](docs/HTTP_DOWNLOADS.md).
 
 ## Find help from your command prompt
