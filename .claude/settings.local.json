@@ -48,7 +48,8 @@
       "Bash(timeout:*)",
       "Bash(GOOS=linux GOARCH=amd64 go build:*)",
       "Bash(git restore:*)",
-      "Bash(tar:*)"
+      "Bash(tar:*)",
+      "Bash(grep:*)"
     ]
   },
   "allowedCommands": [
