@@ -50,6 +50,10 @@ type ChunkID struct {
 	// waitReasonIndex isn't yet ready to go to "Done" at that time.
 	completionNotifiedToJptm *int32
 
+	// Chunk index for resumable downloads - enables chunk-level progress tracking
+	// Pointer so copies of ChunkID share the same index value
+	chunkIndex *uint32
+
 	// TODO: it's a bit odd having two pointers in a struct like this.  Review, maybe we should always work
 	//   with pointers to chunk ids, with nocopy?  If we do that, the two fields that are currently pointers
 	//   can become non-pointers
@@ -98,6 +102,27 @@ func (id ChunkID) IsPseudoChunk() bool {
 
 func (id ChunkID) Length() int64 {
 	return id.length
+}
+
+// SetChunkIndex sets the chunk index for resumable download tracking
+func (id *ChunkID) SetChunkIndex(index uint32) {
+	if id.chunkIndex == nil {
+		id.chunkIndex = new(uint32)
+	}
+	*id.chunkIndex = index
+}
+
+// ChunkIndex returns the chunk index, or 0 if not set
+func (id ChunkID) ChunkIndex() uint32 {
+	if id.chunkIndex == nil {
+		return 0
+	}
+	return *id.chunkIndex
+}
+
+// HasChunkIndex returns true if a chunk index has been set
+func (id ChunkID) HasChunkIndex() bool {
+	return id.chunkIndex != nil
 }
 
 var EWaitReason = WaitReason{0, ""}

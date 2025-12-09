@@ -49,7 +49,10 @@
       "Bash(GOOS=linux GOARCH=amd64 go build:*)",
       "Bash(git restore:*)",
       "Bash(tar:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(go doc:*)",
+      "Bash(go list:*)",
+      "Bash(GOOS=windows GOARCH=amd64 go build:*)"
     ]
   },
   "allowedCommands": [
