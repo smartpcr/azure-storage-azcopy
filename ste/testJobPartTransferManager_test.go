@@ -450,3 +450,11 @@ func (t *testJobPartTransferManager) GetJobErrorHandler() common.JobErrorHandler
 	// TODO: actually implement me if ever wanting to test error handling
 	return &noopJobErrorHandler{}
 }
+
+func (t *testJobPartTransferManager) IsResumableDownload() bool {
+	return false // Mock implementation - resumable downloads not used in tests
+}
+
+func (t *testJobPartTransferManager) SetResumableDownload(value bool) {
+	// Mock implementation - no-op for tests
+}

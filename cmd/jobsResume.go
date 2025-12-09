@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -374,6 +375,63 @@ func (rca resumeCmdArgs) getSourceAndDestinationServiceClients(
 	return srcServiceClient, dstServiceClient, nil
 }
 
+// displayChunkProgress displays chunk-level progress information for resumable downloads
+func displayChunkProgress(jobID common.JobID) {
+	planDir := common.AzcopyJobPlanFolder
+
+	// Look for chunk progress files matching this job ID pattern
+	pattern := filepath.Join(planDir, fmt.Sprintf("%s-*.chunks", jobID.String()))
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		// No chunk progress files found - this is fine, job might not use resumable downloads
+		return
+	}
+
+	fmt.Println("\nResumable download progress:")
+	totalChunksComplete := uint32(0)
+	totalChunks := uint32(0)
+	filesWithProgress := 0
+
+	for _, chunkProgressPath := range matches {
+		progressFile, err := ste.OpenChunkProgressFile(chunkProgressPath)
+		if err != nil {
+			continue // Skip files we can't open
+		}
+
+		completed, total := progressFile.GetProgress()
+		if total == 0 {
+			_ = progressFile.Close()
+			continue // Skip empty progress files
+		}
+
+		totalChunksComplete += completed
+		totalChunks += total
+		filesWithProgress++
+
+		// Calculate percentage
+		percent := float64(completed) * 100.0 / float64(total)
+
+		// Extract transfer index from filename for display
+		filename := filepath.Base(chunkProgressPath)
+		fmt.Printf("  %s: %d/%d chunks (%.1f%%)\n", filename, completed, total, percent)
+
+		_ = progressFile.Close()
+	}
+
+	if filesWithProgress > 0 {
+		overallPercent := float64(totalChunksComplete) * 100.0 / float64(totalChunks)
+		fmt.Printf("\nOverall resumable progress: %d/%d chunks complete (%.1f%%)\n",
+			totalChunksComplete, totalChunks, overallPercent)
+
+		// Estimate data already downloaded (approximate)
+		// Note: This is a rough estimate based on default chunk size
+		const estimatedChunkSize = 64 * 1024 * 1024 // 64MB default
+		estimatedBytes := uint64(totalChunksComplete) * estimatedChunkSize
+		fmt.Printf("Estimated data already downloaded: ~%.2f GB\n\n",
+			float64(estimatedBytes)/(1024*1024*1024))
+	}
+}
+
 // processes the resume command,
 // dispatches the resume Job order to the storage engine.
 func (rca resumeCmdArgs) process() error {
@@ -452,6 +510,10 @@ func (rca resumeCmdArgs) process() error {
 	if err != nil {
 		return fmt.Errorf("cannot resume job with JobId %s, could not create service clients %v", jobID, err)
 	}
+
+	// Display chunk-level progress for resumable downloads (if any)
+	displayChunkProgress(jobID)
+
 	// Send resume job request.
 	resumeJobResponse := jobsAdmin.ResumeJobOrder(common.ResumeJobRequest{
 		JobID:            jobID,

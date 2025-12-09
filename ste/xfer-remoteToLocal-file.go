@@ -376,6 +376,7 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 
 	// step 5d: tell jptm what to expect, and how to clean up at the end
 	jptm.SetNumberOfChunks(numChunks)
+	jptm.SetResumableDownload(useResumableDownload)
 	if useResumableDownload {
 		jptm.SetActionAfterLastChunk(func() { epilogueWithCleanupResumableDownload(jptm, dl, dstFile, raWriter, chunkProgressFile) })
 	} else {

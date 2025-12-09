@@ -104,6 +104,8 @@ type IJobPartTransferMgr interface {
 	TransferIndex() (partNum, transferIndex uint32)
 	RestartedTransfer() bool
 	GetJobErrorHandler() common.JobErrorHandler
+	IsResumableDownload() bool
+	SetResumableDownload(value bool)
 }
 
 // TransferInfo is a per path object that needs to be transferred
@@ -226,6 +228,9 @@ type jobPartTransferMgr struct {
 	transferInfo *TransferInfo
 
 	actionAfterLastChunk func()
+
+	// isResumableDownload indicates whether this download uses resumable mode (chunk-level progress tracking)
+	isResumableDownload bool
 
 	/*
 		@Parteek removed 3/23 morning, as jeff ad equivalent
@@ -1050,6 +1055,16 @@ func (jptm *jobPartTransferMgr) ShouldInferContentType() bool {
 
 func (jptm *jobPartTransferMgr) SuccessfulBytesTransferred() int64 {
 	return atomic.LoadInt64(&jptm.atomicSuccessfulBytes)
+}
+
+// IsResumableDownload returns whether this transfer is using resumable download mode
+func (jptm *jobPartTransferMgr) IsResumableDownload() bool {
+	return jptm.isResumableDownload
+}
+
+// SetResumableDownload sets whether this transfer is using resumable download mode
+func (jptm *jobPartTransferMgr) SetResumableDownload(value bool) {
+	jptm.isResumableDownload = value
 }
 
 func (jptm *jobPartTransferMgr) GetJobErrorHandler() common.JobErrorHandler {

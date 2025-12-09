@@ -21,15 +21,15 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/Azure/azure-storage-azcopy/v10/azcopy"
-
-	"encoding/json"
-
 	"github.com/Azure/azure-storage-azcopy/v10/common"
+	"github.com/Azure/azure-storage-azcopy/v10/ste"
 	"github.com/spf13/cobra"
 )
 
@@ -125,6 +125,40 @@ func PrintJobTransfers(listTransfersResponse common.ListJobTransfersResponse) {
 	}, EExitCode.Success())
 }
 
+// getChunkProgressSummary returns chunk progress information for resumable downloads
+func getChunkProgressSummary(jobID common.JobID) (hasProgress bool, completed, total uint32, percentComplete float64) {
+	planDir := common.AzcopyJobPlanFolder
+
+	// Look for chunk progress files matching this job ID pattern
+	pattern := filepath.Join(planDir, fmt.Sprintf("%s-*.chunks", jobID.String()))
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return false, 0, 0, 0
+	}
+
+	totalChunksComplete := uint32(0)
+	totalChunks := uint32(0)
+
+	for _, chunkProgressPath := range matches {
+		progressFile, err := ste.OpenChunkProgressFile(chunkProgressPath)
+		if err != nil {
+			continue
+		}
+
+		comp, tot := progressFile.GetProgress()
+		totalChunksComplete += comp
+		totalChunks += tot
+		_ = progressFile.Close()
+	}
+
+	if totalChunks == 0 {
+		return false, 0, 0, 0
+	}
+
+	percentComplete = float64(totalChunksComplete) * 100.0 / float64(totalChunks)
+	return true, totalChunksComplete, totalChunks, percentComplete
+}
+
 // PrintJobProgressSummary prints the response of listOrder command when listOrder command requested the progress summary of an existing job
 func PrintJobProgressSummary(summary common.ListJobSummaryResponse) {
 	// Reset the bytes over the wire counter
@@ -148,7 +182,10 @@ func PrintJobProgressSummary(summary common.ListJobSummaryResponse) {
 			return string(jsonOutput)
 		}
 
-		return fmt.Sprintf(
+		// Get chunk progress if available
+		hasChunkProgress, chunksCompleted, totalChunks, chunkPercent := getChunkProgressSummary(summary.JobID)
+
+		baseOutput := fmt.Sprintf(
 			`
 Job %s summary
 Number of File Transfers: %v
@@ -163,8 +200,7 @@ Number of File Transfers Skipped: %v
 Number of Folder Transfers Skipped: %v
 Total Number of Bytes Transferred: %v
 Percent Complete (approx): %.1f
-Final Job Status: %v
-`,
+Final Job Status: %v`,
 			summary.JobID.String(),
 			summary.FileTransfers,
 			summary.FolderPropertyTransfers,
@@ -180,5 +216,18 @@ Final Job Status: %v
 			summary.PercentComplete, // noted as approx in the format string because won't include in-flight files if this Show command is run from a different process
 			summary.JobStatus,
 		)
+
+		// Append chunk progress if available
+		if hasChunkProgress {
+			chunkOutput := fmt.Sprintf(
+				`
+
+Resumable Download Progress:
+  Chunks Completed: %d/%d (%.1f%%)`,
+				chunksCompleted, totalChunks, chunkPercent)
+			baseOutput += chunkOutput
+		}
+
+		return baseOutput + "\n"
 	}, EExitCode.Success())
 }
