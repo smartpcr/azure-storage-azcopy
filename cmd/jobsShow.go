@@ -127,7 +127,9 @@ func PrintJobTransfers(listTransfersResponse common.ListJobTransfersResponse) {
 
 // getChunkProgressSummary returns chunk progress information for resumable downloads
 func getChunkProgressSummary(jobID common.JobID) (hasProgress bool, completed, total uint32, percentComplete float64) {
-	planDir := common.AzcopyJobPlanFolder
+	// Get progress directory from config
+	config := common.GetResumableDownloadConfig()
+	planDir := config.ProgressDir
 
 	// Look for chunk progress files matching this job ID pattern
 	pattern := filepath.Join(planDir, fmt.Sprintf("%s-*.chunks", jobID.String()))

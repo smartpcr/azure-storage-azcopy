@@ -92,6 +92,11 @@ var VisibleEnvironmentVariables = []EnvironmentVariable{
 	EEnvironmentVariable.DisableSyslog(),
 	EEnvironmentVariable.MimeMapping(),
 	EEnvironmentVariable.DownloadToTempPath(),
+	EEnvironmentVariable.ResumableDownloadEnabled(),
+	EEnvironmentVariable.ResumableDownloadThreshold(),
+	EEnvironmentVariable.ResumableDownloadChunkSize(),
+	EEnvironmentVariable.ResumableDownloadSkipMD5(),
+	EEnvironmentVariable.ChunkProgressDir(),
 }
 
 var EEnvironmentVariable = EnvironmentVariable{}
@@ -475,5 +480,44 @@ func (EnvironmentVariable) DisableBlobTransferResume() EnvironmentVariable {
 		Name:         "AZCOPY_DISABLE_INCOMPLETE_BLOB_TRANSFER",
 		DefaultValue: "false",
 		Description:  "An incomplete transfer to blob endpoint will be resumed from start if set to true",
+	}
+}
+
+func (EnvironmentVariable) ResumableDownloadEnabled() EnvironmentVariable {
+	return EnvironmentVariable{
+		Name:         "AZCOPY_RESUMABLE_DOWNLOAD",
+		DefaultValue: "true",
+		Description:  "Enable chunk-level resumable downloads for large files. Set to 'false' to disable.",
+	}
+}
+
+func (EnvironmentVariable) ResumableDownloadThreshold() EnvironmentVariable {
+	return EnvironmentVariable{
+		Name:         "AZCOPY_RESUMABLE_THRESHOLD",
+		DefaultValue: "268435456", // 256MB
+		Description:  "Minimum file size (in bytes) to trigger resumable download mode. Default is 256MB (268435456 bytes).",
+	}
+}
+
+func (EnvironmentVariable) ResumableDownloadChunkSize() EnvironmentVariable {
+	return EnvironmentVariable{
+		Name:         "AZCOPY_RESUMABLE_CHUNK_SIZE",
+		DefaultValue: "67108864", // 64MB
+		Description:  "Chunk size (in bytes) for resumable downloads. Default is 64MB (67108864 bytes). Must be at least 4MB.",
+	}
+}
+
+func (EnvironmentVariable) ResumableDownloadSkipMD5() EnvironmentVariable {
+	return EnvironmentVariable{
+		Name:         "AZCOPY_RESUME_SKIP_MD5",
+		DefaultValue: "false",
+		Description:  "Skip MD5 validation on resumed chunk-level downloads. Set to 'true' to skip validation.",
+	}
+}
+
+func (EnvironmentVariable) ChunkProgressDir() EnvironmentVariable {
+	return EnvironmentVariable{
+		Name:        "AZCOPY_CHUNK_PROGRESS_DIR",
+		Description: "Custom directory for storing chunk progress files. Defaults to the same location as job plan files.",
 	}
 }

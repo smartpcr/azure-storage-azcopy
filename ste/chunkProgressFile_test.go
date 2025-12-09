@@ -28,6 +28,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCreateChunkProgressFile(t *testing.T) {
@@ -38,7 +39,7 @@ func TestCreateChunkProgressFile(t *testing.T) {
 	chunkSize := int64(64 * 1024)        // 64KB
 	sourceMD5 := md5.Sum([]byte("test")) // Example MD5
 
-	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, sourceMD5[:])
+	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, sourceMD5[:], time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestOpenChunkProgressFile(t *testing.T) {
 	chunkSize := int64(64 * 1024)  // 64KB
 
 	// Create a file first
-	cpf1, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil)
+	cpf1, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestMarkChunkComplete(t *testing.T) {
 	totalSize := int64(256 * 1024) // 256KB
 	chunkSize := int64(64 * 1024)  // 64KB
 
-	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil)
+	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -226,7 +227,7 @@ func TestMarkChunkFailed(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.chunks")
 
-	cpf, err := CreateChunkProgressFile(path, 256*1024, 64*1024, nil)
+	cpf, err := CreateChunkProgressFile(path, 256*1024, 64*1024, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -262,7 +263,7 @@ func TestGetCompletedChunks(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.chunks")
 
-	cpf, err := CreateChunkProgressFile(path, 512*1024, 64*1024, nil)
+	cpf, err := CreateChunkProgressFile(path, 512*1024, 64*1024, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -304,7 +305,7 @@ func TestGetPendingChunks(t *testing.T) {
 	totalSize := int64(256 * 1024) // 256KB = 4 chunks
 	chunkSize := int64(64 * 1024)
 
-	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil)
+	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestConcurrentAccess(t *testing.T) {
 	totalSize := int64(10 * 1024 * 1024) // 10MB
 	chunkSize := int64(64 * 1024)        // 64KB chunks = 160 chunks
 
-	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil)
+	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -417,7 +418,7 @@ func TestBackgroundSync(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.chunks")
 
-	cpf, err := CreateChunkProgressFile(path, 256*1024, 64*1024, nil)
+	cpf, err := CreateChunkProgressFile(path, 256*1024, 64*1024, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -439,7 +440,7 @@ func TestCloseSync(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "test.chunks")
 
-	cpf, err := CreateChunkProgressFile(path, 256*1024, 64*1024, nil)
+	cpf, err := CreateChunkProgressFile(path, 256*1024, 64*1024, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -474,7 +475,7 @@ func TestLargeFileChunks(t *testing.T) {
 	totalSize := int64(1024 * 1024 * 1024 * 1024) // 1TB
 	chunkSize := int64(64 * 1024 * 1024)          // 64MB
 
-	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil)
+	cpf, err := CreateChunkProgressFile(path, totalSize, chunkSize, nil, time.Now())
 	if err != nil {
 		t.Fatalf("Failed to create chunk progress file: %v", err)
 	}
@@ -508,19 +509,19 @@ func TestInvalidParameters(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Test zero total size
-	_, err := CreateChunkProgressFile(filepath.Join(tmpDir, "test1.chunks"), 0, 64*1024, nil)
+	_, err := CreateChunkProgressFile(filepath.Join(tmpDir, "test1.chunks"), 0, 64*1024, nil, time.Now())
 	if err == nil {
 		t.Error("Should fail with zero total size")
 	}
 
 	// Test zero chunk size
-	_, err = CreateChunkProgressFile(filepath.Join(tmpDir, "test2.chunks"), 1024*1024, 0, nil)
+	_, err = CreateChunkProgressFile(filepath.Join(tmpDir, "test2.chunks"), 1024*1024, 0, nil, time.Now())
 	if err == nil {
 		t.Error("Should fail with zero chunk size")
 	}
 
 	// Test negative total size
-	_, err = CreateChunkProgressFile(filepath.Join(tmpDir, "test3.chunks"), -1024, 64*1024, nil)
+	_, err = CreateChunkProgressFile(filepath.Join(tmpDir, "test3.chunks"), -1024, 64*1024, nil, time.Now())
 	if err == nil {
 		t.Error("Should fail with negative total size")
 	}

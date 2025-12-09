@@ -39,6 +39,8 @@ const (
 	ChunkProgressFileVersion = uint16(1)
 	// DefaultBackgroundSyncInterval is how often to async sync mmap to disk
 	DefaultBackgroundSyncInterval = 5 * time.Second
+	// FileLockTimeout is the maximum time to wait for a file lock
+	FileLockTimeout = 30 * time.Second
 )
 
 // Chunk status values
@@ -60,7 +62,7 @@ type ChunkProgressFileHeader struct {
 	NumChunks       uint32   // Total number of chunks
 	CompletedChunks uint32   // Count of completed chunks (atomic access)
 	SourceMD5       [16]byte // Expected MD5 from source (if available)
-	Reserved        [8]byte  // Reserved for future use
+	LastModified    int64    // Source last modified time (Unix timestamp in seconds)
 }
 
 // ChunkStatus represents the status of a single chunk
@@ -100,7 +102,7 @@ func (e *UnsupportedFilesystemError) Unwrap() error {
 }
 
 // CreateChunkProgressFile creates a new chunk progress file with memory mapping
-func CreateChunkProgressFile(path string, totalSize, chunkSize int64, sourceMD5 []byte) (*ChunkProgressFile, error) {
+func CreateChunkProgressFile(path string, totalSize, chunkSize int64, sourceMD5 []byte, lastModified time.Time) (*ChunkProgressFile, error) {
 	if totalSize <= 0 {
 		return nil, fmt.Errorf("total size must be positive, got %d", totalSize)
 	}
@@ -131,9 +133,16 @@ func CreateChunkProgressFile(path string, totalSize, chunkSize int64, sourceMD5 
 		return nil, fmt.Errorf("failed to create progress file: %w", err)
 	}
 
+	// Acquire exclusive lock to prevent concurrent access
+	if err := LockFileExclusiveWait(file, FileLockTimeout); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to acquire lock on progress file: %w", err)
+	}
+
 	// Memory-map the file
 	mmapData, err := mmapFile(file, int(fileSize))
 	if err != nil {
+		UnlockFile(file)
 		file.Close()
 		return nil, fmt.Errorf("mmap failed: %w", err)
 	}
@@ -163,6 +172,7 @@ func CreateChunkProgressFile(path string, totalSize, chunkSize int64, sourceMD5 
 	cpf.header.TotalSize = totalSize
 	cpf.header.NumChunks = numChunks
 	cpf.header.CompletedChunks = 0
+	cpf.header.LastModified = lastModified.Unix()
 
 	// Copy source MD5 if provided
 	if len(sourceMD5) == 16 {
@@ -192,9 +202,16 @@ func OpenChunkProgressFile(path string) (*ChunkProgressFile, error) {
 		return nil, fmt.Errorf("failed to open progress file: %w", err)
 	}
 
+	// Acquire exclusive lock to prevent concurrent access
+	if err := LockFileExclusiveWait(file, FileLockTimeout); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to acquire lock on progress file: %w", err)
+	}
+
 	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
+		UnlockFile(file)
 		file.Close()
 		return nil, fmt.Errorf("failed to stat progress file: %w", err)
 	}
@@ -202,6 +219,7 @@ func OpenChunkProgressFile(path string) (*ChunkProgressFile, error) {
 
 	// Validate minimum size
 	if fileSize < ChunkProgressFileHeaderSize {
+		UnlockFile(file)
 		file.Close()
 		return nil, fmt.Errorf("progress file too small: %d bytes", fileSize)
 	}
@@ -209,6 +227,7 @@ func OpenChunkProgressFile(path string) (*ChunkProgressFile, error) {
 	// Memory-map the file
 	mmapData, err := mmapFile(file, int(fileSize))
 	if err != nil {
+		UnlockFile(file)
 		file.Close()
 		return nil, fmt.Errorf("mmap failed: %w", err)
 	}
@@ -411,6 +430,11 @@ func (cpf *ChunkProgressFile) Close() error {
 		firstErr = fmt.Errorf("munmap failed: %w", err)
 	}
 
+	// Release file lock
+	if err := UnlockFile(cpf.file); err != nil && firstErr == nil {
+		firstErr = fmt.Errorf("unlock failed: %w", err)
+	}
+
 	// Close file handle
 	if err := cpf.file.Close(); err != nil && firstErr == nil {
 		firstErr = fmt.Errorf("close failed: %w", err)
@@ -433,4 +457,76 @@ func (cpf *ChunkProgressFile) Delete() error {
 // GetChunkProgressPath generates the path for a chunk progress file
 func GetChunkProgressPath(planFolder string, jobID string, partNum, transferIdx uint32) string {
 	return fmt.Sprintf("%s/%s-%d-%d.chunks", planFolder, jobID, partNum, transferIdx)
+}
+
+// ValidateSourceMetadata validates that the source file hasn't changed since progress was saved
+// Returns nil if validation passes, error describing the change if validation fails
+func (cpf *ChunkProgressFile) ValidateSourceMetadata(currentSize int64, currentLastModified time.Time, currentMD5 []byte) error {
+	// Validate file size
+	if cpf.header.TotalSize != currentSize {
+		return fmt.Errorf("source file size changed: stored=%d, current=%d", cpf.header.TotalSize, currentSize)
+	}
+
+	// Validate last modified time (allow 1 second tolerance for filesystem timestamp precision)
+	storedTime := time.Unix(cpf.header.LastModified, 0)
+	timeDiff := currentLastModified.Sub(storedTime)
+	if timeDiff < -time.Second || timeDiff > time.Second {
+		return fmt.Errorf("source file modified: stored=%v, current=%v", storedTime, currentLastModified)
+	}
+
+	// Validate MD5 if both are available
+	if currentMD5 != nil && len(currentMD5) == 16 {
+		storedMD5 := cpf.header.SourceMD5
+		// Check if stored MD5 is not zero (meaning it was set)
+		isZero := true
+		for _, b := range storedMD5 {
+			if b != 0 {
+				isZero = false
+				break
+			}
+		}
+
+		if !isZero {
+			// Compare MD5 values
+			for i := range storedMD5 {
+				if storedMD5[i] != currentMD5[i] {
+					return fmt.Errorf("source file MD5 changed (content modified)")
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateIntegrity performs basic integrity checks on the progress file
+// Returns nil if validation passes, error if corruption detected
+func (cpf *ChunkProgressFile) ValidateIntegrity() error {
+	// Validate chunk count matches file size calculation
+	expectedChunks := uint32((cpf.header.TotalSize + cpf.header.ChunkSize - 1) / cpf.header.ChunkSize)
+	if cpf.header.NumChunks != expectedChunks {
+		return fmt.Errorf("chunk count mismatch: stored=%d, expected=%d for size=%d/chunkSize=%d",
+			cpf.header.NumChunks, expectedChunks, cpf.header.TotalSize, cpf.header.ChunkSize)
+	}
+
+	// Count completed chunks and verify against header
+	actualCompleted := uint32(0)
+	for i := uint32(0); i < cpf.header.NumChunks; i++ {
+		status := atomic.LoadUint32(&cpf.chunks[i].Status)
+		if status == ChunkStatusCompleted {
+			actualCompleted++
+		} else if status > ChunkStatusFailed {
+			// Invalid status value
+			return fmt.Errorf("invalid chunk status %d at index %d", status, i)
+		}
+	}
+
+	storedCompleted := atomic.LoadUint32(&cpf.header.CompletedChunks)
+	if actualCompleted != storedCompleted {
+		// This could happen during concurrent writes, so just log a warning
+		// and update the header to match reality
+		atomic.StoreUint32(&cpf.header.CompletedChunks, actualCompleted)
+	}
+
+	return nil
 }

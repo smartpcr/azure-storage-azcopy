@@ -1,0 +1,143 @@
+// Copyright © Microsoft <wastore@microsoft.com>
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+//go:build linux || darwin || freebsd || openbsd || netbsd
+
+package ste
+
+import (
+	"fmt"
+	"path/filepath"
+	"syscall"
+)
+
+// DiskSpaceInfo contains information about available disk space
+type DiskSpaceInfo struct {
+	TotalBytes     uint64
+	AvailableBytes uint64
+	UsedBytes      uint64
+	PercentUsed    float64
+}
+
+// GetAvailableDiskSpace returns the available disk space for the filesystem containing the given path
+func GetAvailableDiskSpace(path string) (*DiskSpaceInfo, error) {
+	// Get the directory containing the path
+	dir := filepath.Dir(path)
+
+	var stat syscall.Statfs_t
+	err := syscall.Statfs(dir, &stat)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get disk space for %s: %w", path, err)
+	}
+
+	// Calculate disk space
+	// Bavail = blocks available to non-root users
+	// Bsize = block size in bytes
+	availableBytes := uint64(stat.Bavail) * uint64(stat.Bsize)
+	totalBytes := uint64(stat.Blocks) * uint64(stat.Bsize)
+	usedBytes := totalBytes - (uint64(stat.Bfree) * uint64(stat.Bsize))
+
+	var percentUsed float64
+	if totalBytes > 0 {
+		percentUsed = float64(usedBytes) * 100.0 / float64(totalBytes)
+	}
+
+	return &DiskSpaceInfo{
+		TotalBytes:     totalBytes,
+		AvailableBytes: availableBytes,
+		UsedBytes:      usedBytes,
+		PercentUsed:    percentUsed,
+	}, nil
+}
+
+// CheckDiskSpaceAvailable checks if there is enough disk space available for the given size
+// It includes a safety margin (10% or 1GB, whichever is smaller) to avoid filling the disk completely
+func CheckDiskSpaceAvailable(path string, requiredBytes int64) error {
+	if requiredBytes <= 0 {
+		return nil
+	}
+
+	info, err := GetAvailableDiskSpace(path)
+	if err != nil {
+		// If we can't determine disk space, don't block the download
+		// The OS will return ENOSPC if there's truly no space
+		return nil
+	}
+
+	// Calculate safety margin: 10% of required size or 1GB, whichever is smaller
+	safetyMargin := requiredBytes / 10
+	if safetyMargin > 1024*1024*1024 {
+		safetyMargin = 1024 * 1024 * 1024 // 1GB
+	}
+
+	totalRequired := uint64(requiredBytes) + uint64(safetyMargin)
+
+	if info.AvailableBytes < totalRequired {
+		return &InsufficientDiskSpaceError{
+			Path:           path,
+			RequiredBytes:  requiredBytes,
+			AvailableBytes: int64(info.AvailableBytes),
+			TotalBytes:     int64(info.TotalBytes),
+		}
+	}
+
+	return nil
+}
+
+// InsufficientDiskSpaceError indicates there is not enough disk space available
+type InsufficientDiskSpaceError struct {
+	Path           string
+	RequiredBytes  int64
+	AvailableBytes int64
+	TotalBytes     int64
+}
+
+func (e *InsufficientDiskSpaceError) Error() string {
+	return fmt.Sprintf("insufficient disk space: path=%s, required=%s, available=%s, total=%s",
+		e.Path,
+		formatBytes(e.RequiredBytes),
+		formatBytes(e.AvailableBytes),
+		formatBytes(e.TotalBytes))
+}
+
+// formatBytes formats bytes into human-readable format
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	switch exp {
+	case 0:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(div))
+	case 1:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(div))
+	case 2:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(div))
+	case 3:
+		return fmt.Sprintf("%.1f TB", float64(bytes)/float64(div))
+	default:
+		return fmt.Sprintf("%.1f PB", float64(bytes)/float64(div))
+	}
+}

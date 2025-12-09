@@ -377,7 +377,9 @@ func (rca resumeCmdArgs) getSourceAndDestinationServiceClients(
 
 // displayChunkProgress displays chunk-level progress information for resumable downloads
 func displayChunkProgress(jobID common.JobID) {
-	planDir := common.AzcopyJobPlanFolder
+	// Get progress directory from config
+	config := common.GetResumableDownloadConfig()
+	planDir := config.ProgressDir
 
 	// Look for chunk progress files matching this job ID pattern
 	pattern := filepath.Join(planDir, fmt.Sprintf("%s-*.chunks", jobID.String()))

@@ -35,12 +35,6 @@ import (
 
 const azcopyTempDownloadPrefix string = ".azDownload-%s-"
 
-// Resumable download configuration
-const (
-	resumableDownloadThreshold = 256 * 1024 * 1024 // 256MB - minimum file size to enable resumable download
-	defaultResumableChunkSize  = 64 * 1024 * 1024  // 64MB - chunk size for progress tracking
-)
-
 // xfer.go requires just a single xfer function for the whole job.
 // This routine serves that role for downloads and redirects for each transfer to a file or folder implementation
 func remoteToLocal(jptm IJobPartTransferMgr, pacer pacer, df downloaderFactory) {
@@ -115,6 +109,17 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 		// This will save hours in the event a user has say, a several hundred gigabyte file.
 		if len(info.SrcHTTPHeaders.ContentMD5) == 0 {
 			jptm.LogDownloadError(info.Source, info.Destination, errExpectedMd5Missing.Error(), 0)
+			jptm.SetStatus(common.ETransferStatus.Failed())
+			jptm.ReportTransferDone()
+			return
+		}
+	}
+
+	// step 3a: check if there is sufficient disk space available
+	// Skip check for /dev/null
+	if !strings.EqualFold(info.Destination, common.Dev_Null) && fileSize > 0 {
+		if err := CheckDiskSpaceAvailable(info.Destination, fileSize); err != nil {
+			jptm.LogDownloadError(info.Source, info.Destination, err.Error(), 0)
 			jptm.SetStatus(common.ETransferStatus.Failed())
 			jptm.ReportTransferDone()
 			return
@@ -298,8 +303,12 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 	common.GetLifecycleMgr().E2EAwaitAllowOpenFiles()
 	dl.Prologue(jptm)
 
-	// step 5c.1: determine if resumable download should be used
-	useResumableDownload := fileSize >= resumableDownloadThreshold &&
+	// step 5c.1: get resumable download configuration
+	resumableConfig := common.GetResumableDownloadConfig()
+
+	// step 5c.2: determine if resumable download should be used
+	useResumableDownload := resumableConfig.Enabled &&
+		fileSize >= resumableConfig.Threshold &&
 		supportsRandomAccess(dl) &&
 		!jptm.ShouldDecompress() && // Can't resume compressed downloads
 		!strings.EqualFold(info.Destination, common.Dev_Null) // Don't use for dev null
@@ -315,14 +324,38 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 		existingProgress, err := OpenChunkProgressFile(chunkProgressPath)
 		if err == nil && existingProgress != nil {
 			// RESUME PATH: Load existing progress
-			chunkProgressFile = existingProgress
-			pendingChunks = existingProgress.GetPendingChunks()
-			completed, total := existingProgress.GetProgress()
-			jptm.Log(common.LogInfo, fmt.Sprintf(
-				"Resuming download: %d/%d chunks already complete",
-				completed,
-				total,
-			))
+
+			// Validate that the source file hasn't changed
+			if err := existingProgress.ValidateSourceMetadata(
+				fileSize,
+				jptm.LastModifiedTime(),
+				info.SrcHTTPHeaders.ContentMD5,
+			); err != nil {
+				jptm.Log(common.LogWarning, fmt.Sprintf("Source file has changed: %v. Starting fresh download.", err))
+				_ = existingProgress.Close()
+				_ = existingProgress.Delete()
+				useResumableDownload = false
+			} else if err := existingProgress.ValidateIntegrity(); err != nil {
+				// Validate progress file integrity
+				jptm.Log(common.LogWarning, fmt.Sprintf("Progress file corrupted: %v. Starting fresh download.", err))
+				_ = existingProgress.Close()
+				_ = existingProgress.Delete()
+				useResumableDownload = false
+			} else {
+				// Validation passed, use existing progress
+				chunkProgressFile = existingProgress
+				pendingChunks = existingProgress.GetPendingChunks()
+				completed, total := existingProgress.GetProgress()
+				jptm.Log(common.LogInfo, fmt.Sprintf(
+					"Resuming download: %d/%d chunks already complete",
+					completed,
+					total,
+				))
+			}
+		}
+
+		// If we have valid existing progress, open the file for random access writes
+		if chunkProgressFile != nil && useResumableDownload {
 
 			// Open existing file for random access writes
 			raWriter, err = common.OpenExistingRandomAccessFileWriter(
@@ -340,13 +373,17 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 					chunkProgressFile = nil
 				}
 			}
-		} else {
+		}
+
+		// If validation failed or no existing progress, create fresh progress file
+		if chunkProgressFile == nil && useResumableDownload {
 			// FRESH START: Create new progress file
 			chunkProgressFile, err = CreateChunkProgressFile(
 				chunkProgressPath,
 				fileSize,
 				downloadChunkSize,
 				info.SrcHTTPHeaders.ContentMD5,
+				jptm.LastModifiedTime(),
 			)
 			if err != nil {
 				// Fall back to non-resumable download
@@ -817,8 +854,9 @@ func getChunkProgressPath(jptm IJobPartTransferMgr) string {
 	info := jptm.Info()
 	partNum, transferIdx := jptm.TransferIndex()
 
-	// Use same directory as the plan files
-	planDir := common.AzcopyJobPlanFolder
+	// Get progress directory from config (defaults to job plan folder)
+	config := common.GetResumableDownloadConfig()
+	planDir := config.ProgressDir
 
 	// Format: <planDir>/<jobID>-<partNum>-<transferIdx>.chunks
 	fileName := fmt.Sprintf("%s-%d-%d.chunks", info.JobID.String(), partNum, transferIdx)
