@@ -29,6 +29,20 @@ import (
 	"unsafe"
 )
 
+// This file implements disk space checking for Windows systems.
+// It uses the GetDiskFreeSpaceExW Windows API to query filesystem statistics
+// and ensure adequate disk space is available before starting large downloads.
+//
+// The implementation includes a 10% safety margin (or 1GB, whichever is smaller) to
+// avoid completely filling the filesystem, which can cause system instability.
+//
+// Platform-specific details:
+//   - Uses kernel32.dll's GetDiskFreeSpaceExW function
+//   - Handles UTF-16 path encoding required by Windows API
+//   - FreeBytesAvailable: bytes available to the calling user (respects quotas)
+//   - TotalNumberOfBytes: total bytes on the volume
+//   - TotalNumberOfFreeBytes: total free bytes (ignoring quotas)
+
 // DiskSpaceInfo contains information about available disk space
 type DiskSpaceInfo struct {
 	TotalBytes     uint64
@@ -123,7 +137,18 @@ type InsufficientDiskSpaceError struct {
 }
 
 func (e *InsufficientDiskSpaceError) Error() string {
-	return fmt.Sprintf("insufficient disk space: path=%s, required=%s, available=%s, total=%s",
+	return fmt.Sprintf(`insufficient disk space for download:
+  Path: %s
+  Required: %s (includes 10%% safety margin)
+  Available: %s
+  Total: %s
+
+Suggested actions:
+  1. Free up disk space by deleting unused files
+  2. Use Windows Disk Cleanup utility
+  3. Check disk usage in File Explorer
+  4. Use a different destination drive with more space
+  5. Empty the Recycle Bin`,
 		e.Path,
 		formatBytes(e.RequiredBytes),
 		formatBytes(e.AvailableBytes),

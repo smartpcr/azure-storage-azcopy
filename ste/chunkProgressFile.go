@@ -18,6 +18,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// Package ste provides the Storage Transfer Engine for AzCopy.
+//
+// This file implements chunk-level progress tracking for resumable downloads.
+// It uses memory-mapped files for efficient concurrent access by multiple worker
+// goroutines downloading different chunks of the same file.
+//
+// File Format:
+//   - Header (64 bytes): File metadata, chunk configuration, source validation data
+//   - Chunk Status Array (24 bytes × numChunks): Status and MD5 for each chunk
+//
+// The progress file enables:
+//   - Resume capability after interruption (process crash, network failure, etc.)
+//   - Source change detection (validates file size, last modified time, MD5)
+//   - Corruption detection (validates chunk count and status values)
+//   - Concurrent access protection (exclusive file locking)
+//
+// Usage:
+//   - Create: CreateChunkProgressFile() for new downloads
+//   - Open: OpenChunkProgressFile() to resume existing downloads
+//   - Mark complete: MarkChunkComplete() as each chunk finishes
+//   - Query: GetPendingChunks() to identify work remaining
+//   - Cleanup: Delete() when download completes successfully
 package ste
 
 import (

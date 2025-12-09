@@ -30,6 +30,31 @@ import (
 	"unsafe"
 )
 
+// This file implements file locking for Windows systems.
+// It uses the LockFileEx/UnlockFileEx Windows API to prevent multiple AzCopy
+// processes from simultaneously resuming the same download, which would cause
+// data corruption.
+//
+// File locking behavior:
+//   - LOCKFILE_EXCLUSIVE_LOCK: Exclusive lock (only one process can hold it)
+//   - LOCKFILE_FAIL_IMMEDIATELY: Non-blocking (fail immediately if lock is held)
+//   - Uses OVERLAPPED structure for specifying lock range (we lock 1 byte at offset 0)
+//
+// The lock is automatically released when:
+//   - The file handle is closed
+//   - The process terminates (gracefully or via crash)
+//   - UnlockFileEx() is called explicitly
+//
+// Timeout handling:
+//   - LockFileExclusiveWait() retries for up to 30 seconds (default)
+//   - Polls every 100ms to avoid busy-waiting
+//   - Returns FileLockTimeoutError if timeout is reached
+//
+// Platform-specific notes:
+//   - Windows requires OVERLAPPED structure even for synchronous locks
+//   - We lock 1 byte at offset 0 (the entire lock range is arbitrary)
+//   - Lock granularity is per-handle, not per-process
+
 var (
 	kernel32    = syscall.NewLazyDLL("kernel32.dll")
 	lockFileEx  = kernel32.NewProc("LockFileEx")
@@ -122,6 +147,17 @@ type FileLockTimeoutError struct {
 }
 
 func (e *FileLockTimeoutError) Error() string {
-	return fmt.Sprintf("failed to acquire file lock on %s after %v (another process may be using this file)",
-		e.Path, e.Timeout)
+	return fmt.Sprintf(`failed to acquire file lock after %v:
+  File: %s
+
+This usually means another AzCopy process is resuming the same download.
+
+Suggested actions:
+  1. Wait for the other process to complete
+  2. Check Task Manager for running AzCopy processes
+  3. If the other process crashed, manually delete the chunk progress file:
+     del %USERPROFILE%\.azcopy\*.chunks
+  4. Restart the download with 'azcopy jobs resume <jobID>'`,
+		e.Timeout,
+		e.Path)
 }

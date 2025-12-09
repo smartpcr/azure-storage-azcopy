@@ -28,6 +28,20 @@ import (
 	"syscall"
 )
 
+// This file implements disk space checking for Unix-like systems (Linux, macOS, BSD).
+// It uses the statfs() system call to query filesystem statistics and ensure adequate
+// disk space is available before starting large downloads.
+//
+// The implementation includes a 10% safety margin (or 1GB, whichever is smaller) to
+// avoid completely filling the filesystem, which can cause system instability.
+//
+// Platform-specific details:
+//   - Uses syscall.Statfs_t structure
+//   - Bavail: blocks available to non-root users
+//   - Bfree: total free blocks (including reserved for root)
+//   - Blocks: total blocks in filesystem
+//   - Bsize: block size in bytes
+
 // DiskSpaceInfo contains information about available disk space
 type DiskSpaceInfo struct {
 	TotalBytes     uint64
@@ -110,11 +124,22 @@ type InsufficientDiskSpaceError struct {
 }
 
 func (e *InsufficientDiskSpaceError) Error() string {
-	return fmt.Sprintf("insufficient disk space: path=%s, required=%s, available=%s, total=%s",
+	return fmt.Sprintf(`insufficient disk space for download:
+  Path: %s
+  Required: %s (includes 10%% safety margin)
+  Available: %s
+  Total: %s
+
+Suggested actions:
+  1. Free up disk space: rm -rf /path/to/unused/files
+  2. Check disk usage: df -h %s
+  3. Use a different destination with more space
+  4. Clean up temporary files: rm -rf /tmp/*`,
 		e.Path,
 		formatBytes(e.RequiredBytes),
 		formatBytes(e.AvailableBytes),
-		formatBytes(e.TotalBytes))
+		formatBytes(e.TotalBytes),
+		e.Path)
 }
 
 // formatBytes formats bytes into human-readable format

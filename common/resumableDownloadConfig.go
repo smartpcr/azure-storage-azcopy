@@ -25,6 +25,27 @@ import (
 	"strings"
 )
 
+// This file implements configuration management for resumable chunk-level downloads.
+// It reads environment variables and applies validation to ensure settings are
+// within safe and reasonable bounds.
+//
+// Configuration parameters:
+//   - AZCOPY_RESUMABLE_DOWNLOAD: Enable/disable resumable downloads (default: true)
+//   - AZCOPY_RESUMABLE_THRESHOLD: Minimum file size for resumable mode (default: 256MB)
+//   - AZCOPY_RESUMABLE_CHUNK_SIZE: Size of each download chunk (default: 64MB)
+//   - AZCOPY_RESUME_SKIP_MD5: Skip MD5 validation on resume (default: false)
+//   - AZCOPY_CHUNK_PROGRESS_DIR: Directory for chunk progress files (default: ~/.azcopy/)
+//
+// Validation rules:
+//   - Chunk size must be between 4MB and 100MB
+//   - Threshold must be at least 4MB
+//   - Boolean values support: true/false, 1/0, yes/no, on/off
+//
+// Example usage:
+//   export AZCOPY_RESUMABLE_THRESHOLD=536870912  # 512MB
+//   export AZCOPY_RESUMABLE_CHUNK_SIZE=33554432  # 32MB
+//   azcopy copy "https://..." "/local/path"
+
 const (
 	// MinResumableChunkSize is the minimum chunk size (4MB)
 	MinResumableChunkSize = 4 * 1024 * 1024

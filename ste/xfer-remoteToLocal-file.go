@@ -313,6 +313,30 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 		!jptm.ShouldDecompress() && // Can't resume compressed downloads
 		!strings.EqualFold(info.Destination, common.Dev_Null) // Don't use for dev null
 
+	// Log resumable download decision
+	if useResumableDownload {
+		jptm.Log(common.LogInfo, fmt.Sprintf(
+			"Starting resumable download for file %s (size: %d bytes, chunk size: %d bytes)",
+			info.Destination,
+			fileSize,
+			downloadChunkSize,
+		))
+	} else if !resumableConfig.Enabled {
+		jptm.Log(common.LogDebug, "Resumable downloads disabled via configuration")
+	} else if fileSize < resumableConfig.Threshold {
+		jptm.Log(common.LogDebug, fmt.Sprintf(
+			"File size %d bytes below resumable threshold %d bytes, using standard mode",
+			fileSize,
+			resumableConfig.Threshold,
+		))
+	} else if !supportsRandomAccess(dl) {
+		jptm.Log(common.LogDebug, "Source doesn't support random access, using standard mode")
+	} else if jptm.ShouldDecompress() {
+		jptm.Log(common.LogDebug, "Decompression enabled, cannot use resumable mode")
+	} else if strings.EqualFold(info.Destination, common.Dev_Null) {
+		jptm.Log(common.LogDebug, "Destination is /dev/null, using standard mode")
+	}
+
 	var raWriter *common.RandomAccessFileWriter
 	var pendingChunks []uint32
 	var chunkProgressFile *ChunkProgressFile
@@ -378,6 +402,10 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 		// If validation failed or no existing progress, create fresh progress file
 		if chunkProgressFile == nil && useResumableDownload {
 			// FRESH START: Create new progress file
+			jptm.Log(common.LogInfo, fmt.Sprintf(
+				"Creating new chunk progress file for %s",
+				info.Destination,
+			))
 			chunkProgressFile, err = CreateChunkProgressFile(
 				chunkProgressPath,
 				fileSize,
@@ -406,6 +434,12 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 						_ = chunkProgressFile.Delete()
 						chunkProgressFile = nil
 					}
+				} else {
+					jptm.Log(common.LogDebug, fmt.Sprintf(
+						"Initialized resumable download: %d chunks of %d bytes each",
+						numChunks,
+						downloadChunkSize,
+					))
 				}
 			}
 		}
@@ -632,10 +666,13 @@ func epilogueWithCleanupResumableDownload(jptm IJobPartTransferMgr, dl downloade
 	haveNonEmptyFile := raWriter != nil
 	if haveNonEmptyFile {
 		// Finalize the random access file writer
+		jptm.Log(common.LogInfo, fmt.Sprintf("Finalizing resumable download for %s", info.Destination))
 		var finalizeErr error
 		md5OfFileAsWritten, finalizeErr = raWriter.Finalize(info.getDownloadPath())
 		if finalizeErr != nil {
 			jptm.FailActiveDownload("Finalizing file", finalizeErr)
+		} else {
+			jptm.Log(common.LogDebug, fmt.Sprintf("Successfully finalized resumable download for %s", info.Destination))
 		}
 
 		// Close the file if we have a handle
@@ -683,8 +720,12 @@ func epilogueWithCleanupResumableDownload(jptm IJobPartTransferMgr, dl downloade
 				// After successful rename, delete the chunk progress file
 				if chunkProgressFile != nil {
 					_ = chunkProgressFile.Close()
-					_ = chunkProgressFile.Delete()
-					jptm.Log(common.LogDebug, "Deleted chunk progress file after successful download")
+					deleteErr := chunkProgressFile.Delete()
+					if deleteErr != nil {
+						jptm.Log(common.LogWarning, fmt.Sprintf("Failed to delete chunk progress file: %v", deleteErr))
+					} else {
+						jptm.Log(common.LogInfo, fmt.Sprintf("Resumable download completed successfully for %s", info.Destination))
+					}
 				}
 			}
 		}
