@@ -22,6 +22,8 @@ package ste
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/file"
@@ -147,6 +149,85 @@ func (bd *azureFilesDownloader) GenerateDownloadFunc(jptm IJobPartTransferMgr, d
 			jptm.FailActiveDownload("Enqueuing chunk", err)
 			return
 		}
+	})
+}
+
+// SupportsResume returns true - Azure Files always supports range requests
+func (bd *azureFilesDownloader) SupportsResume() bool {
+	return true
+}
+
+// GenerateResumableDownloadFunc returns a chunk function for resumable Azure Files downloads
+// This uses RandomAccessFileWriter instead of ChunkedFileWriter for direct chunk writes
+func (bd *azureFilesDownloader) GenerateResumableDownloadFunc(jptm IJobPartTransferMgr, writer *common.RandomAccessFileWriter, id common.ChunkID, length int64, pacer pacer) chunkFunc {
+	return createResumableDownloadChunkFunc(jptm, id, func() {
+
+		// Download the chunk
+		jptm.LogChunkStatus(id, common.EWaitReason.HeaderResponse())
+		get, err := bd.source.DownloadStream(jptm.Context(), &file.DownloadStreamOptions{
+			Range: file.HTTPRange{Offset: id.OffsetInFile(), Count: length},
+		})
+		if err != nil {
+			jptm.FailActiveDownload("Downloading response body", err)
+			return
+		}
+
+		// Verify that the file has not been changed via a client side LMT check
+		getLMT := get.LastModified.In(time.FixedZone("GMT", 0))
+		if !getLMT.Equal(jptm.LastModifiedTime().In(time.FixedZone("GMT", 0))) {
+			jptm.FailActiveDownload("Azure File modified during transfer",
+				errors.New("azure File modified during transfer"))
+			return
+		}
+
+		// Read chunk data into memory
+		jptm.LogChunkStatus(id, common.EWaitReason.Body())
+		retryReader := get.NewRetryReader(jptm.Context(), &file.RetryReaderOptions{
+			MaxRetries:   3,
+			OnFailedRead: common.NewFileReadLogFunc(jptm, jptm.Info().Source),
+		})
+		defer retryReader.Close()
+
+		chunkData := make([]byte, length)
+		bytesRead := int64(0)
+
+		// Read with pacing
+		pacedReader := newPacedResponseBody(jptm.Context(), retryReader, pacer)
+		for bytesRead < length {
+			n, readErr := pacedReader.Read(chunkData[bytesRead:])
+			bytesRead += int64(n)
+
+			if readErr != nil && readErr != io.EOF {
+				err = fmt.Errorf("error reading chunk data: %w", readErr)
+				jptm.FailActiveDownload("Reading chunk data", err)
+				return
+			}
+
+			if readErr == io.EOF {
+				break
+			}
+		}
+
+		if bytesRead != length {
+			err = fmt.Errorf("incomplete read: expected %d bytes, got %d", length, bytesRead)
+			jptm.FailActiveDownload("Reading chunk data", err)
+			return
+		}
+
+		// Write chunk to file at specific offset
+		if !id.HasChunkIndex() {
+			err = fmt.Errorf("chunk ID missing index for resumable download")
+			jptm.FailActiveDownload("Writing chunk", err)
+			return
+		}
+
+		err = writer.WriteChunk(id.ChunkIndex(), id.OffsetInFile(), chunkData)
+		if err != nil {
+			jptm.FailActiveDownload("Writing chunk to file", err)
+			return
+		}
+
+		// Chunk completed successfully - it's already written to disk
 	})
 }
 

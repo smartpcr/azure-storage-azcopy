@@ -43,6 +43,16 @@ func TestResumableDownloaderInterface(t *testing.T) {
 			downloader:     &blobDownloader{},
 			shouldBeResumable: true,
 		},
+		{
+			name:           "Azure Files downloader should be resumable",
+			downloader:     &azureFilesDownloader{},
+			shouldBeResumable: true,
+		},
+		{
+			name:           "BlobFS downloader should be resumable",
+			downloader:     &blobFSDownloader{},
+			shouldBeResumable: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -169,5 +179,45 @@ func TestDownloaderInterface(t *testing.T) {
 		if rd == nil {
 			t.Error("resumableDownloader upgrade failed")
 		}
+	}
+}
+
+// TestAzureFilesDownloader_SupportsResume tests the SupportsResume method for Azure Files downloader
+func TestAzureFilesDownloader_SupportsResume(t *testing.T) {
+	afd := &azureFilesDownloader{}
+
+	// Azure Files should always support resume
+	if !afd.SupportsResume() {
+		t.Error("Azure Files downloader should always support resume")
+	}
+
+	// Also test via interface
+	resumable, ok := interface{}(afd).(resumableDownloader)
+	if !ok {
+		t.Fatal("azureFilesDownloader should implement resumableDownloader")
+	}
+
+	if !resumable.SupportsResume() {
+		t.Error("Interface SupportsResume() should return true for Azure Files")
+	}
+}
+
+// TestBlobFSDownloader_SupportsResume tests the SupportsResume method for BlobFS downloader
+func TestBlobFSDownloader_SupportsResume(t *testing.T) {
+	bfsd := &blobFSDownloader{}
+
+	// BlobFS should always support resume
+	if !bfsd.SupportsResume() {
+		t.Error("BlobFS downloader should always support resume")
+	}
+
+	// Also test via interface
+	resumable, ok := interface{}(bfsd).(resumableDownloader)
+	if !ok {
+		t.Fatal("blobFSDownloader should implement resumableDownloader")
+	}
+
+	if !resumable.SupportsResume() {
+		t.Error("Interface SupportsResume() should return true for BlobFS")
 	}
 }
