@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -346,4 +347,155 @@ func bytesEqual(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// SupportsResume returns true if the HTTP server supports range requests
+func (hd *httpDownloader) SupportsResume() bool {
+	return hd.supportsRange
+}
+
+// GenerateResumableDownloadFunc returns a chunk function for resumable HTTP downloads
+// This uses RandomAccessFileWriter instead of ChunkedFileWriter for direct chunk writes
+func (hd *httpDownloader) GenerateResumableDownloadFunc(jptm IJobPartTransferMgr, writer *common.RandomAccessFileWriter, id common.ChunkID, length int64, pacer pacer) chunkFunc {
+	return createResumableDownloadChunkFunc(jptm, id, func() {
+		// Download chunk from HTTP server
+		jptm.LogChunkStatus(id, common.EWaitReason.HeaderResponse())
+
+		// Create range request
+		req, err := http.NewRequestWithContext(jptm.Context(), "GET", hd.sourceURL, nil)
+		if err != nil {
+			jptm.FailActiveDownload("Creating HTTP request", err)
+			return
+		}
+
+		// Add range header (required for resumable downloads)
+		if !hd.supportsRange {
+			err := fmt.Errorf("server does not support range requests, cannot use resumable download")
+			jptm.FailActiveDownload("Range request validation", err)
+			return
+		}
+
+		rangeHeader := fmt.Sprintf("bytes=%d-%d", id.OffsetInFile(), id.OffsetInFile()+length-1)
+		req.Header.Set("Range", rangeHeader)
+
+		// Add authentication if available
+		if hd.bearerToken != "" {
+			req.Header.Set("Authorization", "Bearer "+hd.bearerToken)
+		}
+
+		// Add If-Match for consistency (use ETag if available)
+		if hd.etag != "" {
+			req.Header.Set("If-Match", hd.etag)
+		}
+
+		// Execute request with retries
+		var resp *http.Response
+		retries := 0
+		maxRetries := 3 // Default retry count for resumable downloads
+
+		for retries <= maxRetries {
+			resp, err = hd.httpClient.Do(req)
+			if err == nil && resp.StatusCode == http.StatusPartialContent {
+				break
+			}
+
+			// Log retry
+			if err != nil {
+				jptm.Log(common.LogWarning, fmt.Sprintf("HTTP request failed (attempt %d/%d): %v", retries+1, maxRetries+1, err))
+			} else {
+				jptm.Log(common.LogWarning, fmt.Sprintf("HTTP request failed with status %d (attempt %d/%d)", resp.StatusCode, retries+1, maxRetries+1))
+				if resp.Body != nil {
+					resp.Body.Close()
+				}
+			}
+
+			retries++
+			if retries <= maxRetries {
+				// Exponential backoff
+				backoff := time.Duration(retries) * time.Second
+				if backoff > 30*time.Second {
+					backoff = 30 * time.Second
+				}
+				time.Sleep(backoff)
+
+				// Recreate request for retry
+				req, err = http.NewRequestWithContext(jptm.Context(), "GET", hd.sourceURL, nil)
+				if err != nil {
+					jptm.FailActiveDownload("Creating HTTP request for retry", err)
+					return
+				}
+				req.Header.Set("Range", rangeHeader)
+				if hd.bearerToken != "" {
+					req.Header.Set("Authorization", "Bearer "+hd.bearerToken)
+				}
+				if hd.etag != "" {
+					req.Header.Set("If-Match", hd.etag)
+				}
+			}
+		}
+
+		if err != nil {
+			jptm.FailActiveDownload("Downloading response body", err)
+			return
+		}
+
+		if resp.StatusCode != http.StatusPartialContent {
+			if resp.Body != nil {
+				resp.Body.Close()
+			}
+			err := fmt.Errorf("expected status 206 Partial Content, got %d", resp.StatusCode)
+			jptm.FailActiveDownload("Downloading response body", err)
+			return
+		}
+
+		defer resp.Body.Close()
+
+		// Read chunk data into memory
+		jptm.LogChunkStatus(id, common.EWaitReason.Body())
+
+		chunkData := make([]byte, length)
+		bytesRead := int64(0)
+
+		for bytesRead < length {
+			n, readErr := resp.Body.Read(chunkData[bytesRead:])
+			bytesRead += int64(n)
+
+			if readErr != nil && readErr != io.EOF {
+				err = fmt.Errorf("error reading chunk data: %w", readErr)
+				jptm.FailActiveDownload("Reading chunk data", err)
+				return
+			}
+
+			if readErr == io.EOF {
+				break
+			}
+
+			// Apply pacing if available
+			if pacer != nil {
+				pacer.RequestTrafficAllocation(jptm.Context(), int64(n))
+			}
+		}
+
+		if bytesRead != length {
+			err = fmt.Errorf("incomplete read: expected %d bytes, got %d", length, bytesRead)
+			jptm.FailActiveDownload("Reading chunk data", err)
+			return
+		}
+
+		// Write chunk to file at specific offset
+		if !id.HasChunkIndex() {
+			err = fmt.Errorf("chunk ID missing index for resumable download")
+			jptm.FailActiveDownload("Writing chunk", err)
+			return
+		}
+
+		err = writer.WriteChunk(id.ChunkIndex(), id.OffsetInFile(), chunkData)
+		if err != nil {
+			jptm.FailActiveDownload("Writing chunk to file", err)
+			return
+		}
+
+		// Chunk completed successfully - it's already written to disk
+		// No need to enqueue to ChunkedFileWriter
+	})
 }

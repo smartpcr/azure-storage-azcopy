@@ -88,6 +88,19 @@ type nfsPermissionsAwareDownloader interface {
 	PutNFSPermissions(sip INFSPropertyBearingSourceInfoProvider, txInfo *TransferInfo) error
 }
 
+// resumableDownloader extends downloader to support resumable downloads with chunk-level progress tracking
+type resumableDownloader interface {
+	downloader
+
+	// GenerateResumableDownloadFunc returns a func() that will download the specified portion
+	// of the remote file using random-access writes for resumability
+	GenerateResumableDownloadFunc(jptm IJobPartTransferMgr, writer *common.RandomAccessFileWriter, id common.ChunkID, length int64, pacer pacer) chunkFunc
+
+	// SupportsResume returns true if this downloader can support resumable downloads
+	// For example, HTTP servers must support Range requests
+	SupportsResume() bool
+}
+
 type downloaderFactory func(jptm IJobPartTransferMgr) (downloader, error)
 
 func createDownloadChunkFunc(jptm IJobPartTransferMgr, id common.ChunkID, body func()) chunkFunc {
@@ -95,4 +108,12 @@ func createDownloadChunkFunc(jptm IJobPartTransferMgr, id common.ChunkID, body f
 	// But we don't do that for downloads, since for those the chunk is not "done" until its flushed out
 	// by the ChunkedFileWriter. (The ChunkedFileWriter will set the status to done at that time.)
 	return createChunkFunc(false, jptm, id, body)
+}
+
+// createResumableDownloadChunkFunc creates a chunk func for resumable downloads
+// Unlike regular downloads, resumable downloads complete when the data is written to disk (not queued)
+func createResumableDownloadChunkFunc(jptm IJobPartTransferMgr, id common.ChunkID, body func()) chunkFunc {
+	// For resumable downloads, the chunk is done when the write completes
+	// (not when it's queued to ChunkedFileWriter)
+	return createChunkFunc(true, jptm, id, body)
 }

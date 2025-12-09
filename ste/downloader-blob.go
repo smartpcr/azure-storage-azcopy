@@ -21,6 +21,8 @@
 package ste
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -206,4 +208,110 @@ type dummyReader struct{}
 
 func (dummyReader) Read(p []byte) (n int, err error) {
 	return len(p), nil
+}
+
+// SupportsResume returns true - blob storage always supports range requests
+func (bd *blobDownloader) SupportsResume() bool {
+	return true
+}
+
+// GenerateResumableDownloadFunc returns a chunk function for resumable blob downloads
+// This uses RandomAccessFileWriter instead of ChunkedFileWriter for direct chunk writes
+func (bd *blobDownloader) GenerateResumableDownloadFunc(jptm IJobPartTransferMgr, writer *common.RandomAccessFileWriter, id common.ChunkID, length int64, pacer pacer) chunkFunc {
+	return createResumableDownloadChunkFunc(jptm, id, func() {
+
+		// If the range does not contain any data, write out empty data without performing download
+		pageRange := pageblob.PageRange{Start: to.Ptr(id.OffsetInFile()), End: to.Ptr(id.OffsetInFile() + length - 1)}
+		if bd.pageRangeOptimizer != nil && !bd.pageRangeOptimizer.doesRangeContainData(pageRange) {
+			// Write zeros for empty page range
+			emptyData := make([]byte, length)
+			if !id.HasChunkIndex() {
+				err := fmt.Errorf("chunk ID missing index for resumable download")
+				jptm.FailActiveDownload("Writing empty chunk", err)
+				return
+			}
+			err := writer.WriteChunk(id.ChunkIndex(), id.OffsetInFile(), emptyData)
+			if err != nil {
+				jptm.FailActiveDownload("Writing empty chunk to file", err)
+			}
+			return
+		}
+
+		// Control rate of data movement for page blobs
+		jptm.LogChunkStatus(id, common.EWaitReason.FilePacer())
+		if err := bd.filePacer.RequestTrafficAllocation(jptm.Context(), length); err != nil {
+			jptm.FailActiveDownload("Pacing block", err)
+			return
+		}
+
+		// Set access conditions to protect against inconsistencies
+		lmt := jptm.LastModifiedTime().In(time.FixedZone("GMT", 0))
+		accessConditions := &blob.AccessConditions{ModifiedAccessConditions: &blob.ModifiedAccessConditions{IfUnmodifiedSince: &lmt}}
+		if isInManagedDiskImportExportAccount(jptm.Info().Source) {
+			accessConditions = nil
+		}
+
+		// Download the chunk
+		jptm.LogChunkStatus(id, common.EWaitReason.HeaderResponse())
+		enrichedContext := withRetryNotification(jptm.Context(), bd.filePacer)
+		get, err := bd.source.DownloadStream(enrichedContext, &blob.DownloadStreamOptions{
+			Range:            blob.HTTPRange{Offset: id.OffsetInFile(), Count: length},
+			AccessConditions: accessConditions,
+			CPKInfo:          jptm.CpkInfo(),
+			CPKScopeInfo:     jptm.CpkScopeInfo(),
+		})
+		if err != nil {
+			jptm.FailActiveDownload("Downloading response body", err)
+			return
+		}
+
+		// Read chunk data into memory
+		jptm.LogChunkStatus(id, common.EWaitReason.Body())
+		retryReader := get.NewRetryReader(enrichedContext, &blob.RetryReaderOptions{
+			MaxRetries:   3,
+			OnFailedRead: common.NewBlobReadLogFunc(jptm, jptm.Info().Source),
+		})
+		defer retryReader.Close()
+
+		chunkData := make([]byte, length)
+		bytesRead := int64(0)
+
+		// Read with pacing
+		pacedReader := newPacedResponseBody(jptm.Context(), retryReader, pacer)
+		for bytesRead < length {
+			n, readErr := pacedReader.Read(chunkData[bytesRead:])
+			bytesRead += int64(n)
+
+			if readErr != nil && readErr != io.EOF {
+				err = fmt.Errorf("error reading chunk data: %w", readErr)
+				jptm.FailActiveDownload("Reading chunk data", err)
+				return
+			}
+
+			if readErr == io.EOF {
+				break
+			}
+		}
+
+		if bytesRead != length {
+			err = fmt.Errorf("incomplete read: expected %d bytes, got %d", length, bytesRead)
+			jptm.FailActiveDownload("Reading chunk data", err)
+			return
+		}
+
+		// Write chunk to file at specific offset
+		if !id.HasChunkIndex() {
+			err = fmt.Errorf("chunk ID missing index for resumable download")
+			jptm.FailActiveDownload("Writing chunk", err)
+			return
+		}
+
+		err = writer.WriteChunk(id.ChunkIndex(), id.OffsetInFile(), chunkData)
+		if err != nil {
+			jptm.FailActiveDownload("Writing chunk to file", err)
+			return
+		}
+
+		// Chunk completed successfully - it's already written to disk
+	})
 }

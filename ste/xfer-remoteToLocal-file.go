@@ -35,6 +35,12 @@ import (
 
 const azcopyTempDownloadPrefix string = ".azDownload-%s-"
 
+// Resumable download configuration
+const (
+	resumableDownloadThreshold = 256 * 1024 * 1024 // 256MB - minimum file size to enable resumable download
+	defaultResumableChunkSize  = 64 * 1024 * 1024  // 64MB - chunk size for progress tracking
+)
+
 // xfer.go requires just a single xfer function for the whole job.
 // This routine serves that role for downloads and redirects for each transfer to a file or folder implementation
 func remoteToLocal(jptm IJobPartTransferMgr, pacer pacer, df downloaderFactory) {
@@ -292,9 +298,89 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 	common.GetLifecycleMgr().E2EAwaitAllowOpenFiles()
 	dl.Prologue(jptm)
 
+	// step 5c.1: determine if resumable download should be used
+	useResumableDownload := fileSize >= resumableDownloadThreshold &&
+		supportsRandomAccess(dl) &&
+		!jptm.ShouldDecompress() && // Can't resume compressed downloads
+		!strings.EqualFold(info.Destination, common.Dev_Null) // Don't use for dev null
+
+	var raWriter *common.RandomAccessFileWriter
+	var pendingChunks []uint32
+	var chunkProgressFile *ChunkProgressFile
+
+	if useResumableDownload {
+		chunkProgressPath := getChunkProgressPath(jptm)
+
+		// Check for existing progress by trying to open the chunk progress file
+		existingProgress, err := OpenChunkProgressFile(chunkProgressPath)
+		if err == nil && existingProgress != nil {
+			// RESUME PATH: Load existing progress
+			chunkProgressFile = existingProgress
+			pendingChunks = existingProgress.GetPendingChunks()
+			completed, total := existingProgress.GetProgress()
+			jptm.Log(common.LogInfo, fmt.Sprintf(
+				"Resuming download: %d/%d chunks already complete",
+				completed,
+				total,
+			))
+
+			// Open existing file for random access writes
+			raWriter, err = common.OpenExistingRandomAccessFileWriter(
+				info.getDownloadPath(),
+				fileSize,
+				downloadChunkSize,
+				len(info.SrcHTTPHeaders.ContentMD5) > 0, // enableMD5
+			)
+			if err != nil {
+				// Fall back to non-resumable download
+				jptm.Log(common.LogWarning, fmt.Sprintf("Failed to open existing file for resume: %v. Starting fresh download.", err))
+				useResumableDownload = false
+				if chunkProgressFile != nil {
+					_ = chunkProgressFile.Close()
+					chunkProgressFile = nil
+				}
+			}
+		} else {
+			// FRESH START: Create new progress file
+			chunkProgressFile, err = CreateChunkProgressFile(
+				chunkProgressPath,
+				fileSize,
+				downloadChunkSize,
+				info.SrcHTTPHeaders.ContentMD5,
+			)
+			if err != nil {
+				// Fall back to non-resumable download
+				jptm.Log(common.LogWarning, fmt.Sprintf("Failed to create chunk progress file: %v. Using standard mode.", err))
+				useResumableDownload = false
+			} else {
+				// Create new random access file writer
+				raWriter, err = common.NewRandomAccessFileWriter(
+					info.getDownloadPath(),
+					fileSize,
+					downloadChunkSize,
+					len(info.SrcHTTPHeaders.ContentMD5) > 0, // enableMD5
+				)
+				if err != nil {
+					// Fall back to non-resumable download
+					jptm.Log(common.LogWarning, fmt.Sprintf("Failed to create random access file writer: %v. Using standard mode.", err))
+					useResumableDownload = false
+					if chunkProgressFile != nil {
+						_ = chunkProgressFile.Close()
+						_ = chunkProgressFile.Delete()
+						chunkProgressFile = nil
+					}
+				}
+			}
+		}
+	}
+
 	// step 5d: tell jptm what to expect, and how to clean up at the end
 	jptm.SetNumberOfChunks(numChunks)
-	jptm.SetActionAfterLastChunk(func() { epilogueWithCleanupDownload(jptm, dl, dstFile, dstWriter) })
+	if useResumableDownload {
+		jptm.SetActionAfterLastChunk(func() { epilogueWithCleanupResumableDownload(jptm, dl, dstFile, raWriter, chunkProgressFile) })
+	} else {
+		jptm.SetActionAfterLastChunk(func() { epilogueWithCleanupDownload(jptm, dl, dstFile, dstWriter) })
+	}
 
 	// step 6: go through the blob range and schedule download chunk jobs
 	// TODO: currently, the epilogue will only run if the number of completed chunks = numChunks.
@@ -306,6 +392,7 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 	// eventually reach numChunks, since we have no better short-term alternative.
 
 	chunkCount := uint32(0)
+	chunkIndex := uint32(0)
 	for startIndex := int64(0); startIndex < fileSize; startIndex += downloadChunkSize {
 		adjustedChunkSize := downloadChunkSize
 
@@ -315,19 +402,47 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 		}
 
 		id := common.NewChunkID(info.Destination, startIndex, adjustedChunkSize) // TODO: stop using adjustedChunkSize, below, and use the size that's in the ID
+		id.SetChunkIndex(chunkIndex)                                             // Set chunk index for progress tracking
+
+		// Check if this chunk is already complete (for resumable downloads)
+		if useResumableDownload && pendingChunks != nil {
+			if !containsChunk(pendingChunks, chunkIndex) {
+				// Chunk already complete, skip it
+				jptm.Log(common.LogDebug, fmt.Sprintf("Skipping already completed chunk %d", chunkIndex))
+				jptm.ReportChunkDone(id) // Count it as done
+				chunkCount++
+				chunkIndex++
+				continue
+			}
+		}
 
 		// Wait until its OK to schedule it
 		// To prevent excessive RAM consumption, we have a limit on the amount of scheduled-but-not-yet-saved data
 		// TODO: as per comment above, currently, if there's an error here we must continue because we must schedule all chunks
 		// TODO: ... Can we refactor/improve that?
-		_ = dstWriter.WaitToScheduleChunk(jptm.Context(), id, adjustedChunkSize)
+		if !useResumableDownload {
+			_ = dstWriter.WaitToScheduleChunk(jptm.Context(), id, adjustedChunkSize)
+		}
 
-		// create download func that is a appropriate to the remote data source
-		downloadFunc := dl.GenerateDownloadFunc(jptm, dstWriter, id, adjustedChunkSize, pacer)
+		// create download func that is appropriate to the remote data source
+		var downloadFunc chunkFunc
+		if useResumableDownload {
+			// Use resumable download function with RandomAccessFileWriter
+			if resumableDL, ok := dl.(resumableDownloader); ok {
+				downloadFunc = resumableDL.GenerateResumableDownloadFunc(jptm, raWriter, id, adjustedChunkSize, pacer)
+			} else {
+				// Fallback - shouldn't happen since we checked supportsRandomAccess above
+				jptm.Log(common.LogWarning, "Downloader doesn't support resumable downloads, falling back")
+				downloadFunc = dl.GenerateDownloadFunc(jptm, dstWriter, id, adjustedChunkSize, pacer)
+			}
+		} else {
+			downloadFunc = dl.GenerateDownloadFunc(jptm, dstWriter, id, adjustedChunkSize, pacer)
+		}
 
 		// schedule the download chunk job
 		jptm.ScheduleChunks(downloadFunc)
 		chunkCount++
+		chunkIndex++
 
 		jptm.LogChunkStatus(id, common.EWaitReason.WorkerGR())
 	}
@@ -460,6 +575,108 @@ func epilogueWithCleanupDownload(jptm IJobPartTransferMgr, dl downloader, active
 	commonDownloaderCompletion(jptm, info, common.EEntityType.File())
 }
 
+// complete epilogue for resumable downloads. Handles both success and failure
+func epilogueWithCleanupResumableDownload(jptm IJobPartTransferMgr, dl downloader, activeDstFile io.WriteCloser, raWriter *common.RandomAccessFileWriter, chunkProgressFile *ChunkProgressFile) {
+	info := jptm.Info()
+
+	// allow our usual state tracking mechanism to keep count of how many epilogues are running at any given instant, for perf diagnostics
+	pseudoId := common.NewPseudoChunkIDForWholeFile(info.Source)
+	jptm.LogChunkStatus(pseudoId, common.EWaitReason.Epilogue())
+	defer jptm.LogChunkStatus(pseudoId, common.EWaitReason.ChunkDone()) // normal setting to done doesn't apply to these pseudo ids
+
+	if jptm.WasCanceled() {
+		// This is where we first realize that the transfer is cancelled. Further statements are no-op and
+		// do not set any transfer status because they all of them verify that jptm is live.
+		jptm.SetStatus(common.ETransferStatus.Cancelled())
+	}
+
+	var md5OfFileAsWritten []byte
+	haveNonEmptyFile := raWriter != nil
+	if haveNonEmptyFile {
+		// Finalize the random access file writer
+		var finalizeErr error
+		md5OfFileAsWritten, finalizeErr = raWriter.Finalize(info.getDownloadPath())
+		if finalizeErr != nil {
+			jptm.FailActiveDownload("Finalizing file", finalizeErr)
+		}
+
+		// Close the file if we have a handle
+		if activeDstFile != nil {
+			closeErr := activeDstFile.Close()
+			if closeErr != nil {
+				jptm.FailActiveDownload("Closing file", closeErr)
+				jptm.LogAtLevelForCurrentTransfer(common.LogInfo, "Error closing file: "+closeErr.Error())
+			}
+		}
+
+		// Check MD5 (but only if file was fully finalized - else no point and may not have hash anyway)
+		if jptm.IsLive() && len(info.SrcHTTPHeaders.ContentMD5) > 0 {
+			comparison := md5Comparer{
+				expected:         info.SrcHTTPHeaders.ContentMD5,
+				actualAsSaved:    md5OfFileAsWritten,
+				validationOption: jptm.MD5ValidationOption(),
+				logger:           jptm}
+			err := comparison.Check()
+			if err != nil {
+				jptm.FailActiveDownload("Checking MD5 hash", err)
+			}
+		}
+
+		// check length if enabled
+		if jptm.IsLive() && info.DestLengthValidation && info.Destination != common.Dev_Null {
+			fi, err := common.OSStat(info.getDownloadPath())
+
+			if err != nil {
+				jptm.FailActiveDownload("Download length check", err)
+			} else if fi.Size() != info.SourceSize {
+				jptm.FailActiveDownload("Download length check", errors.New("destination length did not match source length"))
+			}
+		}
+
+		// check if we need to rename back to original name. At this point, we're sure the file is completely
+		// downloaded and not corrupt.
+		renameNecessary := !strings.EqualFold(info.getDownloadPath(), info.Destination) &&
+			!strings.EqualFold(info.Destination, common.Dev_Null)
+		if jptm.IsLive() && renameNecessary {
+			renameErr := os.Rename(info.getDownloadPath(), info.Destination)
+			if renameErr != nil {
+				jptm.FailActiveDownload("Download rename", renameErr)
+			} else {
+				// After successful rename, delete the chunk progress file
+				if chunkProgressFile != nil {
+					_ = chunkProgressFile.Close()
+					_ = chunkProgressFile.Delete()
+					jptm.Log(common.LogDebug, "Deleted chunk progress file after successful download")
+				}
+			}
+		}
+	}
+
+	// Close chunk progress file if still open
+	if chunkProgressFile != nil {
+		_ = chunkProgressFile.Close()
+	}
+
+	if dl != nil {
+		dl.Epilogue() // it can release resources here
+	}
+
+	// Preserve modified time
+	if jptm.IsLive() {
+		lastModifiedTime, preserveLastModifiedTime := jptm.PreserveLastModifiedTime()
+		if preserveLastModifiedTime && !info.PreserveInfo {
+			err := os.Chtimes(jptm.Info().Destination, lastModifiedTime, lastModifiedTime)
+			if err != nil {
+				jptm.LogError(info.Destination, "Changing Modified Time ", err)
+			} else {
+				jptm.Log(common.LogInfo, fmt.Sprintf(" Preserved Modified Time for %s", info.Destination))
+			}
+		}
+	}
+
+	commonDownloaderCompletion(jptm, info, common.EEntityType.File())
+}
+
 func commonDownloaderCompletion(jptm IJobPartTransferMgr, info *TransferInfo, entityType common.EntityType) {
 redoCompletion:
 	// note that we do not really know whether the context was canceled because of an error, or because the user asked for it
@@ -475,10 +692,20 @@ redoCompletion:
 		}
 		// for files only, cleanup local file if applicable
 		if entityType == entityType.File() && jptm.IsDeadInflight() && jptm.HoldsDestinationLock() {
-			jptm.LogAtLevelForCurrentTransfer(common.LogInfo, "Deleting incomplete destination file")
+			// Check if this is a resumable download (by checking for chunk progress file)
+			chunkProgressPath := getChunkProgressPath(jptm)
+			_, statErr := os.Stat(chunkProgressPath)
+			isResumableDownload := statErr == nil // progress file exists
 
-			// the file created locally should be deleted
-			tryDeleteFile(info, jptm)
+			if isResumableDownload {
+				// Keep the temp file and progress file for resume
+				jptm.LogAtLevelForCurrentTransfer(common.LogInfo,
+					"Keeping partial download for resume. Use 'azcopy jobs resume' to continue.")
+			} else {
+				jptm.LogAtLevelForCurrentTransfer(common.LogInfo, "Deleting incomplete destination file")
+				// the file created locally should be deleted
+				tryDeleteFile(info, jptm)
+			}
 		}
 	} else {
 		if !jptm.IsLive() {
@@ -582,6 +809,37 @@ func (info *TransferInfo) getDownloadPath() string {
 		return filepath.Join(parent, fileName)
 	}
 	return info.Destination
+}
+
+// getChunkProgressPath generates the path for the chunk progress file for a transfer
+func getChunkProgressPath(jptm IJobPartTransferMgr) string {
+	info := jptm.Info()
+	partNum, transferIdx := jptm.TransferIndex()
+
+	// Use same directory as the plan files
+	planDir := common.AzcopyJobPlanFolder
+
+	// Format: <planDir>/<jobID>-<partNum>-<transferIdx>.chunks
+	fileName := fmt.Sprintf("%s-%d-%d.chunks", info.JobID.String(), partNum, transferIdx)
+	return filepath.Join(planDir, fileName)
+}
+
+// containsChunk checks if a chunk index is present in the list of chunks
+func containsChunk(chunks []uint32, target uint32) bool {
+	for _, chunk := range chunks {
+		if chunk == target {
+			return true
+		}
+	}
+	return false
+}
+
+// supportsRandomAccess checks if the downloader supports resumable downloads
+func supportsRandomAccess(dl downloader) bool {
+	if resumable, ok := dl.(resumableDownloader); ok {
+		return resumable.SupportsResume()
+	}
+	return false
 }
 
 // conforms to io.Writer and io.Closer
