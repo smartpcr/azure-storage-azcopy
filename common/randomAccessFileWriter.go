@@ -57,16 +57,21 @@ import (
 //   - Windows: Uses WriteFile() with OVERLAPPED structure
 //   - All platforms: File.Truncate() for space pre-allocation
 
+// ChunkCompleteCallback is called after a chunk is successfully written
+// Parameters: chunkIndex, md5 of the chunk data (nil if not computed)
+type ChunkCompleteCallback func(chunkIndex uint32, md5 []byte)
+
 // RandomAccessFileWriter writes chunks directly to their file offsets
 // enabling random-access writes for resumable downloads
 type RandomAccessFileWriter struct {
-	file            *os.File
-	totalSize       int64
-	chunkSize       int64
+	file              *os.File
+	totalSize         int64
+	chunkSize         int64
 	chunkProgressPath string
-	md5Hasher       hash.Hash
-	chunkMD5Enabled bool
-	mu              sync.Mutex // Protects concurrent WriteAt calls
+	md5Hasher         hash.Hash
+	chunkMD5Enabled   bool
+	mu                sync.Mutex            // Protects concurrent WriteAt calls
+	onChunkComplete   ChunkCompleteCallback // Called after each chunk is written
 }
 
 // NewRandomAccessFileWriter creates a new random-access file writer
@@ -181,6 +186,18 @@ func (w *RandomAccessFileWriter) WriteChunk(chunkIndex uint32, offset int64, dat
 		return fmt.Errorf("partial write: wrote %d bytes, expected %d", n, len(data))
 	}
 
+	// Call the chunk complete callback if set
+	if w.onChunkComplete != nil {
+		// Compute MD5 of chunk data if enabled
+		var chunkMD5 []byte
+		if w.chunkMD5Enabled {
+			hasher := md5.New()
+			hasher.Write(data)
+			chunkMD5 = hasher.Sum(nil)
+		}
+		w.onChunkComplete(chunkIndex, chunkMD5)
+	}
+
 	return nil
 }
 
@@ -247,6 +264,12 @@ func (w *RandomAccessFileWriter) GetPath() string {
 		return ""
 	}
 	return w.file.Name()
+}
+
+// SetOnChunkComplete sets the callback that is called after each chunk is successfully written
+// This is used to mark chunks as complete in the chunk progress file
+func (w *RandomAccessFileWriter) SetOnChunkComplete(callback ChunkCompleteCallback) {
+	w.onChunkComplete = callback
 }
 
 // VerifyChunkIntegrity reads a chunk from the file and verifies its MD5

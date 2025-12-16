@@ -53,10 +53,10 @@ func TestRealHTTPDownload_AzureStackHCI(t *testing.T) {
 
 	// Test parameters
 	const (
-		sourceURL        = "https://aka.ms/infrahcios23"
-		targetFileName   = "AzureStackHCI_25398.469.231004-1141_zn_release_en-us.iso"
-		expectedSize     = int64(3748632576) // ~3.5 GB
-		expectedSHA256   = "140D2A6BC53DADCCB9FB66B0D6D2EF61C9D23EA937F8CCC62788866D02997BCA"
+		sourceURL      = "https://aka.ms/infrahcios23"
+		targetFileName = "AzureStackHCI_25398.469.231004-1141_zn_release_en-us.iso"
+		expectedSize   = int64(3748632576) // ~3.5 GB
+		expectedSHA256 = "140D2A6BC53DADCCB9FB66B0D6D2EF61C9D23EA937F8CCC62788866D02997BCA"
 	)
 
 	// Create temporary directory for download
@@ -143,7 +143,7 @@ func TestRealHTTPDownload_SmallFile(t *testing.T) {
 	// Use a small public file for faster testing
 	const (
 		// Example.com returns a small HTML page, perfect for quick testing
-		sourceURL = "http://example.com/"
+		sourceURL      = "http://example.com/"
 		targetFileName = "example.html"
 	)
 
@@ -207,22 +207,22 @@ func TestRealHTTPDownload_RedirectHandling(t *testing.T) {
 func findAzCopyBinary(t *testing.T) string {
 	// Check environment variable first
 	if path := os.Getenv("AZCOPY_EXECUTABLE_PATH"); path != "" {
-		if _, err := os.Stat(path); err == nil {
+		if isExecutable(path) {
 			return path
 		}
 	}
 
 	// Try common locations
 	possiblePaths := []string{
+		"/tmp/azcopy_test", // Prefer the test build location first
 		"./azcopy",
 		"../azcopy",
 		"../../azcopy",
-		"/tmp/azcopy_test",
 		"./bin/azcopy",
 	}
 
 	for _, path := range possiblePaths {
-		if _, err := os.Stat(path); err == nil {
+		if isExecutable(path) {
 			absPath, _ := filepath.Abs(path)
 			return absPath
 		}
@@ -248,6 +248,21 @@ func findAzCopyBinary(t *testing.T) string {
 
 	t.Logf("Built azcopy at /tmp/azcopy_test")
 	return "/tmp/azcopy_test"
+}
+
+// isExecutable checks if a file exists and is executable
+func isExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	// Check if it's a regular file (not directory) and has execute permission
+	if info.IsDir() {
+		return false
+	}
+	// On Unix, check execute permission
+	mode := info.Mode()
+	return mode&0111 != 0
 }
 
 // computeSHA256 calculates the SHA256 hash of a file
@@ -276,7 +291,7 @@ func TestRealHTTPDownload_AnonymousPublicCDN(t *testing.T) {
 	// Test with a small file from a reliable public CDN
 	const (
 		// Using a small JSON file from a public API
-		sourceURL = "https://httpbin.org/json"
+		sourceURL      = "https://httpbin.org/json"
 		targetFileName = "test.json"
 	)
 

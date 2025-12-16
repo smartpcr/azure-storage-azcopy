@@ -465,13 +465,61 @@ if jptm.IsResumableDownload() {
 - On finalize, combine chunk MD5s... but MD5 doesn't work this way!
 - Need to re-read chunks in order to compute final MD5
 
-**Option C: Skip MD5 on resume, validate via chunk MD5s (recommended)**
+**Option C: Skip MD5 on resume, validate via chunk MD5s (recommended)** ✅ **IMPLEMENTED**
 - Store per-chunk MD5 during initial download
 - On resume, verify each chunk's MD5 before skipping
 - Final MD5 validation only on fresh downloads
 - Add flag: `--resume-skip-md5-validation`
 
 **Recommendation:** Option C for performance, with Option A as fallback when MD5 validation is required.
+
+### 4.9. Chunk Hash Validation on Resume ✅ **IMPLEMENTED**
+
+When a download is interrupted (e.g., process killed, network failure), chunks may be marked "complete" in the progress file even though their data wasn't fully flushed to disk. This is because:
+
+1. WriteChunk() writes data to OS buffer
+2. Callback marks chunk complete with its MD5 hash
+3. Process is killed before OS flushes buffers to disk
+
+**Problem:** On resume, these "complete" chunks contain zeros or partial data, causing file corruption.
+
+**Solution:** Verify chunk integrity on resume before skipping:
+
+```go
+// In xfer-remoteToLocal-file.go, resume path
+completedChunks := chunkProgressFile.GetCompletedChunks()
+for _, chunkIdx := range completedChunks {
+    expectedMD5 := chunkProgressFile.GetChunkMD5(chunkIdx)
+    if len(expectedMD5) == 16 { // Valid MD5
+        chunkOffset := int64(chunkIdx) * downloadChunkSize
+        valid, err := raWriter.VerifyChunkIntegrity(chunkIdx, chunkOffset, expectedMD5)
+        if err != nil || !valid {
+            // Chunk data doesn't match stored MD5 - re-download it
+            pendingChunks = append(pendingChunks, chunkIdx)
+        }
+    }
+}
+```
+
+**Flow:**
+1. On resume, get list of "complete" chunks from progress file
+2. For each "complete" chunk:
+   - Read chunk data from disk
+   - Compute actual MD5 hash
+   - Compare against stored MD5 hash
+3. If mismatch: add to pendingChunks for re-download
+4. Only skip chunks that pass integrity verification
+
+**Benefits:**
+- Detects corrupted chunks from process termination
+- Guarantees data integrity on resumed downloads
+- Automatic recovery - corrupted chunks are simply re-downloaded
+- No user intervention required
+
+**Performance Impact:**
+- ~1-2 seconds per GB of "complete" data to verify
+- Only runs on resume, not fresh downloads
+- Only verifies "complete" chunks, not pending ones
 
 ---
 

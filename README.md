@@ -28,6 +28,8 @@ AzCopy V10 presents easy-to-use commands that are optimized for high performance
 
 :white_check_mark: Recover from failures by restarting previous jobs.
 
+:white_check_mark: **Resumable chunk-level downloads** for large files (>256MB) - automatically resume interrupted downloads from where they left off.
+
 ## Download AzCopy
 The latest binary for AzCopy along with installation instructions may be found
 [here](https://docs.microsoft.com/en-us/azure/storage/common/storage-use-azcopy-v10).
@@ -195,6 +197,65 @@ Write-Host "Download completed in $($time3.TotalSeconds) seconds using BITS"
 AzCopy's parallel chunking delivers **7x faster** downloads compared to PowerShell's Invoke-WebRequest.
 
 For complete documentation, see [HTTP_DOWNLOADS.md](docs/HTTP_DOWNLOADS.md).
+
+## Resumable Downloads
+
+AzCopy supports **resumable chunk-level downloads** for large files. If a download is interrupted (network failure, process termination, system restart), AzCopy can automatically resume from where it left off instead of starting over.
+
+### Key Features
+
+- **Automatic for large files**: Enabled by default for files ≥256MB
+- **Chunk-level progress tracking**: Uses memory-mapped progress files for efficient tracking
+- **Chunk hash validation**: Verifies MD5 hash of each chunk on resume to detect corruption
+- **Source change detection**: Validates source hasn't changed before resuming
+- **Cross-platform support**: Works on Windows, Linux, and macOS
+
+### Data Integrity
+
+AzCopy ensures data integrity during resumable downloads through **chunk hash validation**:
+
+1. **During download**: Each chunk's MD5 hash is computed and stored in the progress file
+2. **On resume**: Before skipping "completed" chunks, their content is re-read and verified against stored hashes
+3. **Corruption recovery**: Any chunks that fail validation are automatically re-downloaded
+
+This protects against scenarios where a process is terminated before data is fully flushed to disk. Even if the progress file shows a chunk as "complete", AzCopy will detect the corruption and re-download that chunk.
+
+### Supported Sources
+
+- Azure Blob Storage
+- Azure Files
+- Azure Data Lake Storage Gen2
+- HTTP/HTTPS (servers that support Range requests)
+
+### Quick Example
+
+```bash
+# Download a large file (resumable mode enabled automatically for files ≥256MB)
+azcopy copy "https://example.com/large-file.iso" "./downloads/"
+
+# If interrupted, simply re-run - AzCopy resumes from where it left off
+azcopy jobs resume <jobID>
+
+# Or use idempotent re-run pattern
+azcopy copy "https://example.com/large-file.iso" "./downloads/" --overwrite=false
+```
+
+### Configuration
+
+Configure via environment variables:
+
+```bash
+# Enable/disable resumable downloads (default: true)
+export AZCOPY_RESUMABLE_DOWNLOAD=true
+
+# Minimum file size for resumable mode (default: 256MB)
+export AZCOPY_RESUMABLE_THRESHOLD=268435456
+
+# Chunk size for progress tracking (default: 64MB, range: 4MB-100MB)
+export AZCOPY_RESUMABLE_CHUNK_SIZE=67108864
+```
+
+For complete documentation, see [resumable-download.md](docs/resumable-download.md).
 
 ## Find help from your command prompt
 

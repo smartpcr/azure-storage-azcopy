@@ -45,6 +45,7 @@ package ste
 import (
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -100,12 +101,13 @@ type ChunkStatus struct {
 type ChunkProgressFile struct {
 	path       string
 	file       *os.File
-	mmapData   []byte                    // Memory-mapped region
-	header     *ChunkProgressFileHeader  // Points into mmapData[0:64]
-	chunks     []ChunkStatus             // Slice over mmapData[64:]
-	syncTicker *time.Ticker              // Background sync ticker
-	done       chan struct{}             // Signal to stop background sync
-	fsInfo     *FilesystemInfo           // Filesystem information
+	mmapData   []byte                   // Memory-mapped region
+	header     *ChunkProgressFileHeader // Points into mmapData[0:64]
+	chunks     []ChunkStatus            // Slice over mmapData[64:]
+	syncTicker *time.Ticker             // Background sync ticker
+	done       chan struct{}            // Signal to stop background sync
+	fsInfo     *FilesystemInfo          // Filesystem information
+	closeOnce  sync.Once                // Ensures Close() runs only once
 }
 
 // UnsupportedFilesystemError indicates the filesystem doesn't support mmap
@@ -434,35 +436,42 @@ func (cpf *ChunkProgressFile) Sync() error {
 
 // Close stops background sync and cleanly closes the file
 func (cpf *ChunkProgressFile) Close() error {
-	// Stop background sync
-	if cpf.syncTicker != nil {
-		cpf.syncTicker.Stop()
-		close(cpf.done)
-	}
+	var closeErr error
 
-	var firstErr error
+	cpf.closeOnce.Do(func() {
+		// Stop background sync
+		if cpf.syncTicker != nil {
+			cpf.syncTicker.Stop()
+		}
+		if cpf.done != nil {
+			close(cpf.done)
+		}
 
-	// Final synchronous sync to ensure durability
-	if err := msyncFile(cpf.mmapData, msyncSync); err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("final msync failed: %w", err)
-	}
+		// Final synchronous sync to ensure durability
+		if cpf.mmapData != nil {
+			if err := msyncFile(cpf.mmapData, msyncSync); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("final msync failed: %w", err)
+			}
 
-	// Unmap memory
-	if err := munmapFile(cpf.mmapData); err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("munmap failed: %w", err)
-	}
+			// Unmap memory
+			if err := munmapFile(cpf.mmapData); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("munmap failed: %w", err)
+			}
+		}
 
-	// Release file lock
-	if err := UnlockFile(cpf.file); err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("unlock failed: %w", err)
-	}
+		// Release file lock and close file handle
+		if cpf.file != nil {
+			if err := UnlockFile(cpf.file); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("unlock failed: %w", err)
+			}
 
-	// Close file handle
-	if err := cpf.file.Close(); err != nil && firstErr == nil {
-		firstErr = fmt.Errorf("close failed: %w", err)
-	}
+			if err := cpf.file.Close(); err != nil && closeErr == nil {
+				closeErr = fmt.Errorf("close failed: %w", err)
+			}
+		}
+	})
 
-	return firstErr
+	return closeErr
 }
 
 // Delete closes the file and removes it from disk

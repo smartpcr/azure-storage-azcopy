@@ -382,11 +382,12 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 		if chunkProgressFile != nil && useResumableDownload {
 
 			// Open existing file for random access writes
+			// Always enable MD5 for resumable downloads to support chunk integrity verification
 			raWriter, err = common.OpenExistingRandomAccessFileWriter(
 				info.getDownloadPath(),
 				fileSize,
 				downloadChunkSize,
-				len(info.SrcHTTPHeaders.ContentMD5) > 0, // enableMD5
+				true, // enableMD5 - always enabled for resumable downloads
 			)
 			if err != nil {
 				// Fall back to non-resumable download
@@ -396,6 +397,41 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 					_ = chunkProgressFile.Close()
 					chunkProgressFile = nil
 				}
+			} else {
+				// Verify integrity of "complete" chunks before resuming
+				// This catches chunks that were marked complete but data wasn't flushed to disk
+				completedChunks := chunkProgressFile.GetCompletedChunks()
+				corruptedCount := 0
+				for _, chunkIdx := range completedChunks {
+					expectedMD5 := chunkProgressFile.GetChunkMD5(chunkIdx)
+					if len(expectedMD5) == 16 { // Valid MD5
+						chunkOffset := int64(chunkIdx) * downloadChunkSize
+						valid, verifyErr := raWriter.VerifyChunkIntegrity(chunkIdx, chunkOffset, expectedMD5)
+						if verifyErr != nil || !valid {
+							// Chunk data doesn't match - mark it as pending for re-download
+							jptm.Log(common.LogWarning, fmt.Sprintf(
+								"Chunk %d failed integrity check, will re-download", chunkIdx))
+							pendingChunks = append(pendingChunks, chunkIdx)
+							corruptedCount++
+						}
+					}
+				}
+				if corruptedCount > 0 {
+					jptm.Log(common.LogWarning, fmt.Sprintf(
+						"Found %d corrupted chunks out of %d complete, will re-download them",
+						corruptedCount, len(completedChunks)))
+				}
+
+				// Set up the callback to mark chunks complete in progress file (for resumed downloads)
+				cpf := chunkProgressFile // capture for closure
+				raWriter.SetOnChunkComplete(func(chunkIndex uint32, md5 []byte) {
+					if cpf != nil {
+						if err := cpf.MarkChunkComplete(chunkIndex, md5); err != nil {
+							jptm.Log(common.LogWarning, fmt.Sprintf(
+								"Failed to mark chunk %d complete: %v", chunkIndex, err))
+						}
+					}
+				})
 			}
 		}
 
@@ -419,11 +455,12 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 				useResumableDownload = false
 			} else {
 				// Create new random access file writer
+				// Always enable MD5 for resumable downloads to support chunk integrity verification
 				raWriter, err = common.NewRandomAccessFileWriter(
 					info.getDownloadPath(),
 					fileSize,
 					downloadChunkSize,
-					len(info.SrcHTTPHeaders.ContentMD5) > 0, // enableMD5
+					true, // enableMD5 - always enabled for resumable downloads
 				)
 				if err != nil {
 					// Fall back to non-resumable download
@@ -435,6 +472,16 @@ func remoteToLocal_file(jptm IJobPartTransferMgr, pacer pacer, df downloaderFact
 						chunkProgressFile = nil
 					}
 				} else {
+					// Set up the callback to mark chunks complete in progress file
+					cpf := chunkProgressFile // capture for closure
+					raWriter.SetOnChunkComplete(func(chunkIndex uint32, md5 []byte) {
+						if cpf != nil {
+							if err := cpf.MarkChunkComplete(chunkIndex, md5); err != nil {
+								jptm.Log(common.LogWarning, fmt.Sprintf(
+									"Failed to mark chunk %d complete: %v", chunkIndex, err))
+							}
+						}
+					})
 					jptm.Log(common.LogDebug, fmt.Sprintf(
 						"Initialized resumable download: %d chunks of %d bytes each",
 						numChunks,
