@@ -156,7 +156,7 @@ Suggested actions:
   1. Wait for the other process to complete
   2. Check Task Manager for running AzCopy processes
   3. If the other process crashed, manually delete the chunk progress file:
-     del %USERPROFILE%\.azcopy\*.chunks
+     del %%USERPROFILE%%\.azcopy\*.chunks
   4. Restart the download with 'azcopy jobs resume <jobID>'`,
 		e.Timeout,
 		e.Path)

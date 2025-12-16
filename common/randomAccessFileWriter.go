@@ -97,7 +97,7 @@ func NewRandomAccessFileWriter(
 	// Pre-allocate space using Truncate
 	// This reserves disk space and can help prevent ENOSPC errors later
 	if err := file.Truncate(totalSize); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to allocate space: %w", err)
 	}
 
@@ -132,12 +132,12 @@ func OpenExistingRandomAccessFileWriter(
 	// Verify file size matches expected
 	stat, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
 	if stat.Size() != totalSize {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("file size mismatch: got %d, expected %d", stat.Size(), totalSize)
 	}
 
@@ -251,7 +251,7 @@ func (w *RandomAccessFileWriter) Close() error {
 	// Sync before closing to ensure data is written
 	if err := w.file.Sync(); err != nil {
 		// Try to close anyway
-		w.file.Close()
+		_ = w.file.Close()
 		return fmt.Errorf("failed to sync: %w", err)
 	}
 
@@ -274,7 +274,7 @@ func (w *RandomAccessFileWriter) SetOnChunkComplete(callback ChunkCompleteCallba
 
 // VerifyChunkIntegrity reads a chunk from the file and verifies its MD5
 // This is useful when resuming to ensure partially written chunks are valid
-func (w *RandomAccessFileWriter) VerifyChunkIntegrity(chunkIndex uint32, offset int64, expectedMD5 []byte) (bool, error) {
+func (w *RandomAccessFileWriter) VerifyChunkIntegrity(_ uint32, offset int64, expectedMD5 []byte) (bool, error) {
 	if len(expectedMD5) != 16 {
 		return false, fmt.Errorf("invalid MD5 length: %d", len(expectedMD5))
 	}

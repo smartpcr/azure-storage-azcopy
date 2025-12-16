@@ -54,7 +54,8 @@
       "Bash(go list:*)",
       "Bash(GOOS=windows GOARCH=amd64 go build:*)",
       "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 60 go test:*)",
-      "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 180 go test:*)"
+      "Bash(AZCOPY_EXECUTABLE_PATH=/tmp/azcopy_test timeout 180 go test:*)",
+      "Bash(GOOS=windows GOARCH=amd64 go test:*)"
     ]
   },
   "allowedCommands": [

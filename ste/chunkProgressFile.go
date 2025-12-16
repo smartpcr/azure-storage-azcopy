@@ -159,15 +159,15 @@ func CreateChunkProgressFile(path string, totalSize, chunkSize int64, sourceMD5 
 
 	// Acquire exclusive lock to prevent concurrent access
 	if err := LockFileExclusiveWait(file, FileLockTimeout); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to acquire lock on progress file: %w", err)
 	}
 
 	// Memory-map the file
 	mmapData, err := mmapFile(file, int(fileSize))
 	if err != nil {
-		UnlockFile(file)
-		file.Close()
+		_ = UnlockFile(file)
+		_ = file.Close()
 		return nil, fmt.Errorf("mmap failed: %w", err)
 	}
 
@@ -228,31 +228,31 @@ func OpenChunkProgressFile(path string) (*ChunkProgressFile, error) {
 
 	// Acquire exclusive lock to prevent concurrent access
 	if err := LockFileExclusiveWait(file, FileLockTimeout); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to acquire lock on progress file: %w", err)
 	}
 
 	// Get file size
 	stat, err := file.Stat()
 	if err != nil {
-		UnlockFile(file)
-		file.Close()
+		_ = UnlockFile(file)
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to stat progress file: %w", err)
 	}
 	fileSize := stat.Size()
 
 	// Validate minimum size
 	if fileSize < ChunkProgressFileHeaderSize {
-		UnlockFile(file)
-		file.Close()
+		_ = UnlockFile(file)
+		_ = file.Close()
 		return nil, fmt.Errorf("progress file too small: %d bytes", fileSize)
 	}
 
 	// Memory-map the file
 	mmapData, err := mmapFile(file, int(fileSize))
 	if err != nil {
-		UnlockFile(file)
-		file.Close()
+		_ = UnlockFile(file)
+		_ = file.Close()
 		return nil, fmt.Errorf("mmap failed: %w", err)
 	}
 
@@ -270,20 +270,20 @@ func OpenChunkProgressFile(path string) (*ChunkProgressFile, error) {
 	// Validate magic bytes
 	magic := string(cpf.header.Magic[:])
 	if magic != ChunkProgressFileMagic {
-		cpf.Close()
+		_ = cpf.Close()
 		return nil, fmt.Errorf("invalid magic bytes: %q (expected %q)", magic, ChunkProgressFileMagic)
 	}
 
 	// Validate version
 	if cpf.header.Version != ChunkProgressFileVersion {
-		cpf.Close()
+		_ = cpf.Close()
 		return nil, fmt.Errorf("unsupported version: %d (expected %d)", cpf.header.Version, ChunkProgressFileVersion)
 	}
 
 	// Calculate expected file size
 	expectedSize := int64(ChunkProgressFileHeaderSize + ChunkStatusSize*int(cpf.header.NumChunks))
 	if fileSize != expectedSize {
-		cpf.Close()
+		_ = cpf.Close()
 		return nil, fmt.Errorf("file size mismatch: got %d, expected %d", fileSize, expectedSize)
 	}
 
@@ -478,7 +478,7 @@ func (cpf *ChunkProgressFile) Close() error {
 func (cpf *ChunkProgressFile) Delete() error {
 	if err := cpf.Close(); err != nil {
 		// Try to delete anyway
-		os.Remove(cpf.path)
+		_ = os.Remove(cpf.path)
 		return err
 	}
 

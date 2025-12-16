@@ -85,78 +85,22 @@ func TestOpenFileForMmap_Local(t *testing.T) {
 	}
 }
 
-// TestFilesystemInfo_Methods tests the FilesystemInfo helper methods
-func TestFilesystemInfo_Methods(t *testing.T) {
-	tests := []struct {
-		name     string
-		info     FilesystemInfo
-		wantMmap bool
-		wantNet  bool
-	}{
-		{
-			name: "local filesystem",
-			info: FilesystemInfo{
-				Type:              FilesystemTypeLocal,
-				IsRemote:          false,
-				SupportsMemoryMap: true,
-			},
-			wantMmap: true,
-			wantNet:  false,
-		},
-		{
-			name: "network filesystem (NFS)",
-			info: FilesystemInfo{
-				Type:              FilesystemTypeNFS,
-				IsRemote:          true,
-				SupportsMemoryMap: false,
-			},
-			wantMmap: false,
-			wantNet:  true,
-		},
-		{
-			name: "network filesystem (CIFS)",
-			info: FilesystemInfo{
-				Type:              FilesystemTypeCIFS,
-				IsRemote:          true,
-				SupportsMemoryMap: false,
-			},
-			wantMmap: false,
-			wantNet:  true,
-		},
+// TestFilesystemInfo_LocalMethods tests the FilesystemInfo helper methods for local filesystem
+// Platform-specific tests are in filesystemDetector_unix_test.go and filesystemDetector_windows_test.go
+func TestFilesystemInfo_LocalMethods(t *testing.T) {
+	info := FilesystemInfo{
+		Type:              FilesystemTypeLocal,
+		IsRemote:          false,
+		SupportsMemoryMap: true,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.info.ShouldUseMmap(); got != tt.wantMmap {
-				t.Errorf("ShouldUseMmap() = %v, want %v", got, tt.wantMmap)
-			}
-
-			if got := tt.info.IsNetworkFilesystem(); got != tt.wantNet {
-				t.Errorf("IsNetworkFilesystem() = %v, want %v", got, tt.wantNet)
-			}
-		})
-	}
-}
-
-// TestUnsupportedFilesystemError tests the error type
-func TestUnsupportedFilesystemError(t *testing.T) {
-	fsInfo := &FilesystemInfo{
-		Type:     FilesystemTypeNFS,
-		IsRemote: true,
+	if !info.ShouldUseMmap() {
+		t.Error("Local filesystem should support mmap")
 	}
 
-	err := &UnsupportedFilesystemError{
-		Path:   "/mnt/nfs/test.dat",
-		FSInfo: fsInfo,
-		Err:    &FilesystemNotSupportedError{},
+	if info.IsNetworkFilesystem() {
+		t.Error("Local filesystem should not be network")
 	}
-
-	errStr := err.Error()
-	if errStr == "" {
-		t.Error("Error string should not be empty")
-	}
-
-	t.Logf("Error message: %s", errStr)
 }
 
 // Note: Testing CSV detection requires a real Windows environment with CSV volumes

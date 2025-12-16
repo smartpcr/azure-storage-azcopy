@@ -142,7 +142,8 @@ func TestIsPublic(t *testing.T) {
 	t.Skip("Public access is sometimes turned off due to organization policy. This test should ideally be migrated to a mocked UT.")
 
 	a := assert.New(t)
-	ctx, _ := context.WithTimeout(context.TODO(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.TODO(), 5*time.Minute)
+	defer cancel()
 	bsc := getBlobServiceClient()
 	ctr, _ := getContainerClient(a, bsc)
 	defer ctr.Delete(ctx, nil)
