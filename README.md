@@ -240,6 +240,61 @@ azcopy jobs resume <jobID>
 azcopy copy "https://example.com/large-file.iso" "./downloads/" --overwrite=false
 ```
 
+### Downloading Large Payloads from HTTPS
+
+AzCopy is ideal for downloading large files (ISOs, VM images, datasets) from HTTPS endpoints with automatic resume capability.
+
+**Real-world example - Download Azure Stack HCI ISO (3.5GB):**
+
+```bash
+# Basic download - resumable mode activates automatically for files ≥256MB
+azcopy copy "https://aka.ms/infrahcios23" "./AzureStackHCI.iso"
+
+# With bandwidth limiting (useful for background downloads)
+azcopy copy "https://aka.ms/infrahcios23" "./AzureStackHCI.iso" --cap-mbps=100
+
+# With verbose logging to monitor progress
+azcopy copy "https://aka.ms/infrahcios23" "./AzureStackHCI.iso" --log-level=INFO
+```
+
+**If download is interrupted (Ctrl+C, network failure, system restart):**
+
+```bash
+# Method 1: Resume using job ID (shown in output when download started)
+azcopy jobs resume 0106a4a4-52e8-e84a-646f-04ae84aa9535
+
+# Method 2: List recent jobs and find the one to resume
+azcopy jobs list
+azcopy jobs resume <jobID>
+
+# Method 3: Simply re-run the same command (detects existing progress)
+azcopy copy "https://aka.ms/infrahcios23" "./AzureStackHCI.iso"
+```
+
+**Download with authentication:**
+
+```bash
+# OAuth Bearer token (for authenticated APIs)
+azcopy copy "https://api.example.com/datasets/large-model.tar.gz" "./model.tar.gz" \
+  --bearer-token="eyJ0eXAiOiJKV1QiLCJhbGci..."
+
+# Custom headers (API keys, request IDs)
+azcopy copy "https://api.example.com/files/dataset.zip" "./dataset.zip" \
+  --http-headers="X-API-Key=your-api-key;X-Request-ID=req-123"
+```
+
+**Performance tips for large downloads:**
+
+```bash
+# Increase concurrency for high-bandwidth connections
+export AZCOPY_CONCURRENCY_VALUE=32
+azcopy copy "https://example.com/large-file.iso" "./file.iso"
+
+# Use larger chunks for very large files (reduces overhead)
+export AZCOPY_RESUMABLE_CHUNK_SIZE=104857600  # 100MB chunks
+azcopy copy "https://example.com/huge-file.tar" "./file.tar"
+```
+
 ### Configuration
 
 Configure via environment variables:
