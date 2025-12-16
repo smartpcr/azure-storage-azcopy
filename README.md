@@ -312,6 +312,99 @@ export AZCOPY_RESUMABLE_CHUNK_SIZE=67108864
 
 For complete documentation, see [resumable-download.md](docs/resumable-download.md).
 
+## Configuration & Settings
+
+AzCopy can be configured via environment variables. No configuration file is required.
+
+### Storage Locations
+
+Control where AzCopy stores logs, job plans, and progress files:
+
+```bash
+# Log files location (default: ~/.azcopy/)
+export AZCOPY_LOG_LOCATION="/custom/path/logs"
+
+# Job plan files - for job state and resume capability (default: ~/.azcopy/)
+export AZCOPY_JOB_PLAN_LOCATION="/custom/path/plans"
+
+# Chunk progress files - for resumable downloads (default: same as job plan location)
+export AZCOPY_CHUNK_PROGRESS_DIR="/custom/path/progress"
+```
+
+**Default file locations:**
+
+| File Type | Default Location | Description |
+|-----------|------------------|-------------|
+| Log files | `~/.azcopy/*.log` | Transfer logs and debugging info |
+| Job plans | `~/.azcopy/*.steV*` | Job state for resume capability |
+| Chunk progress | `~/.azcopy/plans/*.chunks` | Chunk-level progress for large files |
+| Temp downloads | `<target-dir>/.azDownload-*` | Temporary files during download |
+
+### Performance Tuning
+
+```bash
+# Number of parallel HTTP connections (default: auto-detected based on CPU cores)
+export AZCOPY_CONCURRENCY_VALUE=32
+
+# Memory buffer size in GB (default: auto-detected based on available memory)
+export AZCOPY_BUFFER_GB=4
+
+# Number of files transferred concurrently
+export AZCOPY_CONCURRENT_FILES=300
+
+# Parallel file scanning degree
+export AZCOPY_CONCURRENT_SCAN=64
+```
+
+### Download Behavior
+
+```bash
+# Download to temp file first, then rename (default: true)
+export AZCOPY_DOWNLOAD_TO_TEMP_PATH=true
+
+# Enable resumable chunk-level downloads (default: true)
+export AZCOPY_RESUMABLE_DOWNLOAD=true
+
+# Minimum file size to enable resumable mode (default: 256MB)
+export AZCOPY_RESUMABLE_THRESHOLD=268435456
+
+# Chunk size for resumable downloads (default: 64MB)
+export AZCOPY_RESUMABLE_CHUNK_SIZE=67108864
+```
+
+### Example: Dedicated Storage for Large Transfers
+
+```bash
+# Use a fast SSD for AzCopy state (avoids filling up system disk)
+export AZCOPY_LOG_LOCATION="/mnt/fast-ssd/azcopy/logs"
+export AZCOPY_JOB_PLAN_LOCATION="/mnt/fast-ssd/azcopy/plans"
+
+# High-performance settings for large transfers
+export AZCOPY_CONCURRENCY_VALUE=64
+export AZCOPY_BUFFER_GB=8
+
+# Run large transfer
+azcopy copy "https://example.com/dataset.tar" "/data/downloads/"
+```
+
+### Windows Configuration (PowerShell)
+
+```powershell
+# Set for current session
+$env:AZCOPY_LOG_LOCATION = "D:\AzCopy\logs"
+$env:AZCOPY_JOB_PLAN_LOCATION = "D:\AzCopy\plans"
+$env:AZCOPY_CONCURRENCY_VALUE = "32"
+
+# Or set permanently via:
+# System Properties > Advanced > Environment Variables
+```
+
+### View All Environment Variables
+
+```bash
+azcopy env
+```
+
 ## Find help from your command prompt
 
 For convenience, consider adding the AzCopy directory location to your system path for ease of use. That way you can type `azcopy` from any directory on your system.
