@@ -56,8 +56,8 @@ import (
 //   - Lock granularity is per-handle, not per-process
 
 var (
-	kernel32    = syscall.NewLazyDLL("kernel32.dll")
-	lockFileEx  = kernel32.NewProc("LockFileEx")
+	// kernel32 is declared in diskSpace_windows.go
+	lockFileEx   = kernel32.NewProc("LockFileEx")
 	unlockFileEx = kernel32.NewProc("UnlockFileEx")
 )
 
@@ -95,7 +95,7 @@ func LockFileExclusiveWait(file *os.File, timeout time.Duration) error {
 	for {
 		var overlapped syscall.Overlapped
 
-		ret, _, err := lockFileEx.Call(
+		ret, _, _ := lockFileEx.Call(
 			uintptr(syscall.Handle(file.Fd())),
 			uintptr(LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY),
 			uintptr(0),
